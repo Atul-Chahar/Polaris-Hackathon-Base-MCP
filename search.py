@@ -359,6 +359,17 @@ class Catalog:
                 self._embedder = TextEmbedding(EMB_MODEL)
             return self._embedder
 
+    def warm_up(self):
+        """Load the query embedder, its vocabulary and the reranker client before serving. Never raises."""
+        try:
+            self.real_words()
+            if self.emb is not None:
+                self._embed_query('warm up')
+            if llm_rerank.enabled() and len(self.products) >= 1000:
+                llm_rerank._bedrock()
+        except Exception as exc:  # pragma: no cover
+            print(f'[warm_up] {type(exc).__name__}: {exc}', file=sys.stderr)
+
     def real_words(self):
         """Whole-word entries of the embedding model's WordPiece vocabulary: common English words. Misspellings
         ('jackt', 'trousrs', 'tshrit') are split into pieces, so they are never in this set."""

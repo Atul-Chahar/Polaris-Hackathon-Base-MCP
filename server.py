@@ -50,6 +50,7 @@ async def lifespan(app):
     global catalog
     path = os.getenv('CATALOG_PATH', str(Path(__file__).parent / 'data/products.json'))
     catalog = await anyio.to_thread.run_sync(Catalog.load, path)
+    await anyio.to_thread.run_sync(catalog.warm_up)  # first scored query should not pay one-time loads
     async with sessions.run():
         yield
 
