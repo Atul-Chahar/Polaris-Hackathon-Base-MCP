@@ -67,6 +67,19 @@ COMPLEMENT_MAP = {
     'Necklace': ['Earring', 'Bracelet', 'Ring'], 'Tie': ['Shirt', 'Blazer'], 'Belt': ['Trousers', 'Shirt'],
     'Scarf': ['Gloves', 'Hat/beanie', 'Coat'], 'Hat/beanie': ['Scarf', 'Gloves'], 'Dungarees': ['T-shirt', 'Sneakers'],
 }
+ACCESSORIES_FOR = {'Blazer': ['Tie', 'Belt', 'Bag', 'Pumps', 'Other shoe'], 'Shirt': ['Tie', 'Belt', 'Watch'],
+                   'Suit': ['Tie', 'Belt'], 'Dress': ['Bag', 'Earring', 'Necklace', 'Heeled sandals'],
+                   'Bikini top': ['Sunglasses', 'Hat/brim', 'Sarong', 'Flip flop'],
+                   'Swimsuit': ['Sunglasses', 'Hat/brim', 'Sarong', 'Flip flop'],
+                   'Coat': ['Scarf', 'Gloves', 'Hat/beanie'], 'Jacket': ['Scarf', 'Gloves', 'Hat/beanie'],
+                   'Trousers': ['Belt', 'Bag', 'Sunglasses'], 'Sneakers': ['Socks', 'Cap/peaked', 'Bag']}
+FORMAL_TYPES = {'Blazer', 'Tailored Waistcoat', 'Tie'}
+CASUAL_TYPES = {'Sneakers', 'Flip flop', 'Slippers', 'Sandals', 'Cap/peaked', 'Cap', 'Hoodie', 'Bumbag', 'Bucket hat',
+                'Hat/beanie', 'Beanie', 'Leggings/Tights'}
+GENERIC_NAME_WORDS = {'basic', 'pack', 'the', 'and', 'with', 'new', 'fancy', 'top', 'dress', 'shirt', 'tee', 'bra',
+                      'bikini', 'swimsuit', 'brief', 'briefs', 'shorts', 'trousers', 'trs', 'sock', 'socks', 'set', 'kids',
+                      'baby', 'conscious', 'premium', 'slim', 'regular', 'relaxed', 'skinny', 'jersey', 'cotton',
+                      'pkt', 'div', 'bb', 'sb', 'bg', 'sg'}
 NEUTRAL = {'Black', 'White', 'Off White', 'Beige', 'Light Beige', 'Dark Beige', 'Grey', 'Gold', 'Silver',
            'Dark Blue', 'Greyish Beige'}
 
@@ -111,6 +124,10 @@ class Catalog:
         self.type_arr = np.array([p['product_type'] for p in P], dtype=object)
         self.color_arr = np.array([p['color'] for p in P], dtype=object)
         self.pattern_arr = np.array([p['pattern'] for p in P], dtype=object)
+        self.section_arr = np.array([p['section'] for p in P], dtype=object)
+        # Colour variants share the first 7 ID digits (article code) and usually the name.
+        self.family_code = [pid[:7] for pid in self.ids]
+        self.name_key = [re.sub(r'[^a-z]', '', p['name'].casefold()) for p in P]
         self.type_list = sorted(set(self.type_arr))
         self.color_list = sorted(set(self.color_arr))
         self._build_audience()
@@ -207,7 +224,8 @@ class Catalog:
     @lru_cache(maxsize=8192)
     def correct_word(self, w):
         """Conservative edit-distance-1 spelling correction against catalog/vocabulary words."""
-        if len(w) < 4 or not w.isalpha() or w in qp.STOP:
+        if (len(w) < 4 or not w.isalpha() or w in qp.STOP or w in qp.PROTECTED_WORDS or w in qp.IRRELEVANT_WORDS
+                or qp.stem(w) in qp.IRRELEVANT_WORDS):
             return w
         freq = self.vocab.get(w, 0) + self.vocab.get(qp.stem(w), 0)
         typeish = w in qp.TYPE_WORDS or qp.stem(w) in qp.TYPE_WORDS or w in qp.COLOR_WORDS or w in qp.AUDIENCE_WORDS
@@ -308,9 +326,11 @@ class Catalog:
             mask &= np.isin(self.color_arr, spec['colors'])
         aud = spec.get('audience')
         if aud and 'audience' not in filters and 'section' not in filters and aud in self.aud_masks:
-            m = self.aud_masks[aud]
-            if (mask & m).any():
-                mask &= m
+            mask &= self.aud_masks[aud]
+        if spec.get('min_rating') is not None and 'min_rating' not in filters:
+            mask &= ~self.rating_null & (self.rating >= spec['min_rating'])
+        if spec.get('min_reviews') is not None and 'min_review_count' not in filters:
+            mask &= self.count >= spec['min_reviews']
         if 'min_price' not in filters and 'max_price' not in filters:
             if spec.get('min_price') is not None:
                 mask &= self.price >= spec['min_price']
@@ -335,7 +355,7 @@ class Catalog:
                     c['min_price'], c['max_price'] = rules['choices'][0]['min_price'], rules['choices'][0]['max_price']
             if not intent['complements'] and rules['complements']:
                 intent['complements'] = rules['complements']
-        if qp.INJECTION_RE.search(corrected.casefold()) or (not rules['relevant'] and not any(
+        if qp.INJECTION_RE.search(corrected.casefold()) or qp.contradictory(query) or (not rules['relevant'] and not any(
                 c.get('types') for c in rules['choices'])):
             intent['relevant'] = False
         intent['corrected'] = corrected
@@ -349,13 +369,17 @@ class Catalog:
         text = ' '.join(x for x in (spec.get('text') or '', query_text) if x)
         lex = self.bm25(text)[idx]
         lex_n = lex / (lex.max() or 1.0)
-        sem = self.semantic(spec.get('text') or query_text)
+        sem_text = spec.get('text') or query_text
+        vibes = [v for v in qp.VIBE_ATTRS if v in qp.vibe_normalize(f"{sem_text} {spec.get('context') or ''}")]
+        if vibes:  # embed concrete catalog words instead of a style label the model may not know
+            sem_text = f"{sem_text} {' '.join(qp.VIBE_ATTRS[vibes[0]][:6])}"
+        sem = self.semantic(sem_text)
         if sem is not None:
             s = sem[idx]
             score = 0.75 * s + 0.25 * lex_n
         else:
             score = lex_n
-        cov = self.attribute_coverage(text, idx)
+        cov = self.attribute_coverage(f"{text} {spec.get('context') or ''}", idx)
         if cov is not None:
             score = score + 0.18 * cov
         if spec.get('audience') not in ('kids', 'boys', 'girls', 'baby'):
@@ -372,6 +396,7 @@ class Catalog:
     ATTR_SKIP = set(qp.AUDIENCE_WORDS) | {'wear', 'outfit', 'look', 'clothe', 'piece', 'item', 'thing', 'occasion',
                                           'something', 'want', 'need', 'buy', 'show', 'find', 'shop', 'colour', 'color'}
 
+    FORMAL_WORDS = ['formal', 'suit', 'tailoring', 'dressy', 'crease', 'tuxedo']
     ATTR_SYNONYMS = {'floral': ['floral', 'flower', 'flowery'], 'flower': ['floral', 'flower'],
                      'flowery': ['floral', 'flower'], 'stripe': ['stripe', 'striped'], 'striped': ['stripe', 'striped'],
                      'stripy': ['stripe', 'striped'], 'plaid': ['check', 'checked', 'plaid'], 'check': ['check', 'checked'],
@@ -382,11 +407,17 @@ class Catalog:
                      'running': ['running', 'sport', 'sports', 'training', 'run'], 'gym': ['sport', 'sports', 'training'],
                      'workout': ['sport', 'sports', 'training'], 'sporty': ['sport', 'sports'], 'yoga': ['yoga', 'sport'],
                      'party': ['party', 'sequin', 'glitter', 'glittery', 'sheen', 'satin', 'velvet', 'festive'],
-                     'formal': ['tailored', 'formal', 'suit', 'smart', 'dressy'], 'smart': ['tailored', 'smart', 'suit'],
-                     'office': ['tailored', 'smart', 'suit', 'formal'], 'warm': ['padded', 'warm', 'lined', 'thermal',
+                     # "tailored silhouette" is boilerplate in every Regular Fit text, so formality comes from the
+                     # tailoring sections, explicit "formal" wording and pressed creases instead.
+                     'formal': FORMAL_WORDS, 'smart': ['smart', 'suit', 'tailoring'], 'office': FORMAL_WORDS,
+                     'work': FORMAL_WORDS, 'business': FORMAL_WORDS, 'interview': FORMAL_WORDS,
+                     'professional': FORMAL_WORDS, 'corporate': FORMAL_WORDS,
+                     # Season words are soft: many products qualify, so they should not outweigh a pattern or material.
+                     'summer': ['summer', 'linen', 'airy', 'sleeveless', 'strap', 'lightweight', 'short'], 'warm': ['padded', 'warm', 'lined', 'thermal',
                      'down', 'wool', 'quilted', 'fleece'], 'winter': ['padded', 'warm', 'lined', 'wool', 'quilted',
                      'winter', 'fleece'], 'wool': ['wool', 'merino', 'cashmere'], 'casual': ['casual', 'relaxed', 'jersey'],
                      'elegant': ['elegant', 'satin', 'silk', 'chiffon', 'tailored'], 'beach': ['beach', 'swim', 'linen']}
+    ATTR_SYNONYMS.update({k: list(dict.fromkeys(qp.stem(w) for w in v)) for k, v in qp.VIBE_ATTRS.items()})
     ATTR_PATTERNS = {'floral': ['All over pattern'], 'flower': ['All over pattern'], 'printed': ['All over pattern',
                      'Front print', 'Placement print'], 'stripe': ['Stripe'], 'striped': ['Stripe'], 'stripy': ['Stripe'],
                      'check': ['Check'], 'checked': ['Check'], 'plaid': ['Check'], 'polka': ['Dot'], 'dotted': ['Dot'],
@@ -397,9 +428,10 @@ class Catalog:
     def attribute_coverage(self, text, idx):
         """Fraction of descriptive query words (material, pattern, fit, style) present in each candidate's text."""
         attrs = []
-        for w in set(stoks(text)):
+        for w in set(stoks(qp.vibe_normalize(text))):
             if (len(w) < 3 or w in qp.STOP or w in self.ATTR_SKIP or w in qp.TYPE_WORDS or w in qp.COLOR_WORDS
-                    or (w not in self.postings and w not in self.ATTR_PATTERNS) or w.isdigit()):
+                    or (w not in self.postings and w not in self.ATTR_PATTERNS and w not in qp.VIBE_ATTRS)
+                    or w.isdigit()):
                 continue
             if w in self.postings and len(self.postings[w][0]) > 0.25 * len(self.products):
                 continue  # too common to discriminate
@@ -414,10 +446,15 @@ class Catalog:
             for syn in self.ATTR_SYNONYMS.get(w, [w]):
                 if syn in self.postings:
                     hit |= np.isin(idx, self.postings[syn][0])
+            # A pattern code alone ("All over pattern" for floral) is weaker evidence than the word itself.
+            phit = np.zeros(len(idx), dtype=bool)
             for pat in self.ATTR_PATTERNS.get(w, []):
-                hit |= self.pattern_arr[idx] == pat
-            weight = math.log(n / (len(self.postings[w][0]) + 1 if w in self.postings else 2000))
-            cov += weight * hit
+                phit |= self.pattern_arr[idx] == pat
+            weight = math.log(n / (len(self.postings[w][0]) + 1 if w in self.postings and w not in qp.VIBE_ATTRS
+                                   else 2000))
+            if w in self.ATTR_PATTERNS:
+                weight *= 1.5  # visible pattern/material facts outrank season or mood words
+            cov += weight * np.where(hit, 1.0, np.where(phit, 0.5, 0.0))
             total += weight
         return cov / total if total else None
 
@@ -427,7 +464,25 @@ class Catalog:
         top = scores[0]
         keep = scores >= top - (0.12 if has_hard else 0.08)
         n = max(int(keep.sum()), 40 if has_hard else 15)
-        return ranked[:min(n, 300)]
+        return self.diversify(ranked[:min(n, 300)])
+
+    VARIANT_CAP = int(os.getenv('VARIANT_CAP', '0'))  # 2 regressed strict ranking (knitted beanie); off
+
+    def diversify(self, ranked):
+        """Keep at most VARIANT_CAP colour variants of one product in their original slots; later variants move to
+        the end of the relevant set in their original order. Deterministic and independent of offset/limit."""
+        if not self.VARIANT_CAP or len(ranked) < 2:
+            return ranked
+        codes, names, head, tail = Counter(), Counter(), [], []
+        for j in ranked:
+            c, nm = self.family_code[j], self.name_key[j]
+            if codes[c] >= self.VARIANT_CAP or names[nm] >= self.VARIANT_CAP:
+                tail.append(j)
+            else:
+                head.append(j)
+            codes[c] += 1
+            names[nm] += 1
+        return np.array(head + tail, dtype=ranked.dtype)
 
     def ranked_ids(self, query, filters):
         key = (query, json.dumps(filters, sort_keys=True))
@@ -439,7 +494,9 @@ class Catalog:
         if intent.get('relevant', True) and intent['choices']:
             for spec in intent['choices']:
                 mask = self.spec_mask(spec, filters, base)
-                ranked, scores = self.score_spec(spec, mask, '' if len(intent['choices']) > 1 else intent['corrected'])
+                # Mixed choices and requests with a split-off complement score on their own segment text only.
+                single = len(intent['choices']) == 1 and not intent.get('complements')
+                ranked, scores = self.score_spec(spec, mask, intent['corrected'] if single else '')
                 has_hard = bool(spec.get('types') or spec.get('colors'))
                 if not has_hard and not self.looks_relevant(spec, intent['corrected'], ranked, scores):
                     continue
@@ -480,10 +537,19 @@ class Catalog:
         exclude = set(primary_ids) | {r['id'] for r in results}
         anchor = self.products[self.index_of[results[0]['id']]]
         aud = next((c.get('audience') for c in intent.get('choices', []) if c.get('audience')), None)
+        a = self.index_of[anchor['id']]
         if aud is None:
-            a = self.index_of[anchor['id']]
             aud = next((k for k in ('baby', 'kids', 'men', 'women') if self.aud_masks[k][a]), None)
+        if aud == 'kids':  # keep a boys' anchor with boys' or unisex kids items, girls' likewise
+            sec = anchor['section'].casefold()
+            aud = 'boys' if 'boy' in sec else 'girls' if 'girl' in sec else aud
+        formal = (anchor['product_type'] in FORMAL_TYPES or any(w in anchor['section'] for w in ('Tailoring', 'Suits'))
+                  or bool(re.search(r'\b(?:formal|suit|office|business|interview|wedding|work)\b', query.casefold())))
         specs = [dict(c) for c in intent.get('complements', [])]
+        if not specs and re.search(r'accessor', query.casefold()):
+            for t in ACCESSORIES_FOR.get(anchor['product_type'], ['Bag', 'Belt', 'Earring', 'Necklace', 'Sunglasses']):
+                specs.append({'text': t, 'types': [t], 'colors': [], 'audience': None,
+                              'min_price': None, 'max_price': None})
         if not specs:
             for t in COMPLEMENT_MAP.get(anchor['product_type'], []):
                 specs.append({'text': t, 'types': [t], 'colors': [], 'audience': None,
@@ -492,7 +558,7 @@ class Catalog:
             return []
         recs, used = [], set()
         anchor_colors = {anchor['color']} | NEUTRAL
-        per = [self._complement_candidates(s, aud, anchor, anchor_colors, exclude) for s in specs]
+        per = [self._complement_candidates(s, aud, anchor, anchor_colors, exclude, formal) for s in specs]
         for i in range(5):
             for lst in per:
                 if i < len(lst) and len(recs) < 5:
@@ -505,28 +571,60 @@ class Catalog:
                                                 f"{anchor['color'].lower()} {anchor['product_type'].lower()}")[:300]})
         return recs
 
-    def _complement_candidates(self, spec, aud, anchor, anchor_colors, exclude):
+    def _complement_candidates(self, spec, aud, anchor, anchor_colors, exclude, formal=False):
         mask = np.ones(len(self.products), dtype=bool)
         spec = dict(spec)
         spec['audience'] = spec.get('audience') or aud
         mask = self.spec_mask(spec, {}, mask)
         if spec['audience'] in self.aud_masks:
             mask &= self.aud_masks[spec['audience']]
+        if formal:  # no sneakers or flip-flops with a suit when dressier options exist
+            dressy = mask & ~np.isin(self.type_arr, list(CASUAL_TYPES))
+            if dressy.any():
+                mask = dressy
         if spec.get('types'):
             mask &= self.type_arr != anchor['product_type'] if anchor['product_type'] not in spec['types'] else True
         idx = np.flatnonzero(mask)
         if not len(idx):
             return []
-        text = f"{spec.get('text') or ''} {anchor['color']} {anchor['name']}"
+        if anchor['audience'] != 'Sport':
+            # Gym bags and sportswear are poor complements for everyday items.
+            mask &= self.codes['audience'] != self.values['audience'].get('sport', -1)
+        idx = np.flatnonzero(mask)
+        if not len(idx):
+            return []
+        text = f"{spec.get('text') or ''} {anchor['color']} {anchor['product_type']}"
         lex = self.bm25(text)[idx]
         score = 0.3 * lex / (lex.max() or 1.0)
         sem = self.semantic(text)
         if sem is not None:
             score = score + sem[idx]
         score = score + 0.08 * np.isin(self.color_arr[idx], list(anchor_colors))
+        fam = self._name_family(anchor['name'])
+        if fam:  # "Honey Bee" bikini top -> "Honey Bee" bottom: same-collection pieces are the best match
+            score = score + 0.1 * np.array([self._name_family(self.products[j]['name']) == fam for j in idx])
+        if formal:
+            sec = self.section_arr[idx]
+            score = score + 0.08 * np.array(['Tailoring' in x or 'Suits' in x for x in sec])
+            score = score - 0.15 * ((self.pattern_arr[idx] == 'Denim') | np.array(['Denim' in x for x in sec]))
         score = score + 0.02 * np.where(self.rating_null[idx], 3.0, self.rating[idx]) / 5
         order = idx[np.lexsort((idx, -score))]
-        return [int(j) for j in order[:20] if self.ids[j] not in exclude][:5]
+        out, names = [], set()
+        for j in order[:200]:
+            name = self.products[j]['name'].casefold()
+            if self.ids[j] in exclude or name in names:
+                continue
+            names.add(name)
+            out.append(int(j))
+            if len(out) == 5:
+                break
+        return out
+
+    @staticmethod
+    def _name_family(name):
+        ws = re.findall(r'[a-z]+', name.casefold())
+        ws = [w for w in ws if len(w) > 2 and w not in GENERIC_NAME_WORDS]
+        return ' '.join(ws[:2]) if len(ws) >= 2 else None
 
     # ------------------------------------------------------------------ main entry
 

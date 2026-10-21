@@ -107,8 +107,8 @@ TYPE_WORDS = {
     'bracelet': ['Bracelet'], 'bangle': ['Bracelet'], 'ring': ['Ring'], 'jewellery': ['Necklace', 'Earring', 'Bracelet',
     'Ring'], 'jewelry': ['Necklace', 'Earring', 'Bracelet', 'Ring'], 'watch': ['Watch'],
     'belt': ['Belt'], 'glove': ['Gloves'], 'mitten': ['Gloves'], 'tie': ['Tie'], 'necktie': ['Tie'], 'bow tie': ['Tie'],
-    'umbrella': ['Umbrella'], 'sarong': ['Sarong'], 'cover up': ['Sarong', 'Dress', 'Blouse'],
-    'cover-up': ['Sarong', 'Dress', 'Blouse'], 'kaftan': ['Dress', 'Sarong'], 'kimono': ['Jacket', 'Blouse', 'Robe'],
+    'umbrella': ['Umbrella'], 'sarong': ['Sarong'], 'cover up': ['Sarong'],
+    'cover-up': ['Sarong'], 'kaftan': ['Dress', 'Sarong'], 'kimono': ['Jacket', 'Blouse', 'Robe'],
     'costume': ['Costumes'], 'fancy dress': ['Costumes'], 'soft toy': ['Soft Toys'], 'teddy': ['Soft Toys'],
     'plush': ['Soft Toys'], 'toy': ['Soft Toys', 'Toy'], 'water bottle': ['Waterbottle'], 'bottle': ['Waterbottle'],
     'sleeping bag': ['Sleeping sack', 'Sleep Bag'], 'sleeping sack': ['Sleeping sack'], 'bib': ['Baby Bib'],
@@ -148,6 +148,7 @@ IRRELEVANT_WORDS = {
     'cricket', 'football', 'ball', 'bat', 'racket', 'tent', 'fishing', 'guitar', 'piano', 'book', 'novel',
     'washing', 'machine', 'appliance', 'shampoo', 'toothpaste', 'soap', 'detergent', 'diaper', 'nappy', 'milk', 'coffee', 'tea', 'beer', 'wine bottle',
     'whisky', 'rice', 'basmati', 'flour', 'sugar', 'oil', 'kg', 'cigarette', 'vape', 'gun', 'weapon', 'drug', 'pet food', 'cat food', 'fertilizer', 'seed', 'plant',
+    'flight', 'flights', 'refrigerator', 'fridge', 'airline', 'couch', 'lamp',
     'kurta', 'saree', 'sari', 'lehenga', 'sherwani', 'dhoti', 'salwar', 'dupatta',
 }
 
@@ -275,6 +276,7 @@ def find_audience(text):
     return None
 
 
+MENS_COMPLEMENTS = {'Tie'}
 ACCESSORY_TYPES = {'Bag', 'Belt', 'Scarf', 'Gloves', 'Hat/beanie', 'Hat/brim', 'Cap/peaked', 'Socks', 'Tie', 'Sunglasses',
                    'Earring', 'Necklace', 'Bracelet', 'Ring', 'Watch', 'Wallet', 'Sarong', 'Hair/alice band', 'Hair clip',
                    'Umbrella', 'Straw hat', 'Bucket hat', 'Felt hat', 'Beanie', 'Underwear Tights'}
@@ -286,6 +288,12 @@ TRAILING_COMP_RE = re.compile(r'\b(?:to match|to complement|that goes? with (?:i
 def _segments(text):
     """Split a query into primary choice segments and complement segments."""
     low = text.casefold()
+    # "swimsuit with something to cover up", "jeans and something to go with them": the vague part is a complement.
+    m = re.search(r'\bwith\s+(?:something|anything)\b|\b(?:and|plus)\s+(?:something|anything)(?=\s+(?:to go|to match|'
+                  r'matching|to wear with|that goes|to pair|to complement|to cover))', low)
+    if m and find_types(low[:m.start()])[0]:
+        rest = text[m.end():]
+        return [text[:m.start()]], ([rest] if find_types(rest)[0] else [])
     if True:
         # "X with socks to match", "coat with a scarf and gloves", "jeans and a belt that goes with them"
         for w in re.finditer(r'\b(?:with|and|plus)\s+(?:an?\s+|some\s+|the\s+)?', low):
@@ -293,7 +301,9 @@ def _segments(text):
             bt, at = find_types(before)[0], find_types(after)[0]
             if bt and at and (TRAILING_COMP_RE.search(after) or (w.group(0).startswith('with')
                                                                   and set(at) <= ACCESSORY_TYPES)):
-                return [text[:w.start()]], [re.sub(TRAILING_COMP_RE, ' ', text[w.end():])]
+                comp = re.sub(TRAILING_COMP_RE, ' ', text[w.end():])
+                parts = [p for p in re.split(r'\s*(?:,|;|\band\b|&|\bplus\b)\s*', comp) if p.strip()]
+                return [text[:w.start()]], ([p for p in parts if find_types(p)[0]] or [comp])
     m = COMPLEMENT_RE.search(low)
     primary, complement = (text[:m.start()], text[m.end():]) if m else (text, '')
     parts = [p for p in re.split(r'\s*(?:,|;|\band\b|\bor\b|&|\bplus\b|\balong with\b|/)\s*', primary) if p.strip()]
@@ -324,7 +334,33 @@ def _spec(segment):
             'min_price': lo, 'max_price': hi, '_hits': hits}
 
 
+RATING_RE = re.compile(r'(?:rated|rating(?: of)?|with)?\s*(?:at least|above|over|minimum|min|>=?)?\s*(\d(?:\.\d)?)\s*'
+                       r'(?:\+|plus|or more|and above)?\s*(?:-|\s)?stars?(?:\s*(?:rating|rated|reviews?))?')
+RATING2_RE = re.compile(r'(?:rated|rating(?: of)?)\s*(?:at least|above|over|minimum|min)?\s*(\d(?:\.\d)?)\b(?!\s*(?:k\b|\d|rs|inr|₹))')
+REVIEWS_RE = re.compile(r'(?:with\s*)?(?:at least|over|more than|minimum|min|>=?)?\s*(\d[\d,]*)\s*\+?\s*(?:or more\s*)?'
+                        r'(?:customer\s*)?(?:reviews?|ratings)')
+UNSUPPORTED_RE = re.compile(r'\b(?:gps|bluetooth|smart ?watch(?:es)?|heart[- ]rate|fitness tracker|wireless|usb|battery|'
+                            r'diamonds?|platinum|solid gold|real gold|pure gold|\d+\s*k gold|24k|22k|18k|sterling|'
+                            r'engagement ring|wedding ring|mangalsutra|bullet ?proof|fire ?proof|heated|self[- ]cleaning|'
+                            r'noise cancell?ing|prescription|contact lens)\b')
+
+
+def rating_constraints(query):
+    t = query.casefold()
+    min_rating = min_reviews = None
+    m = RATING_RE.search(t) or RATING2_RE.search(t)
+    if m and 1 <= float(m.group(1)) <= 5:
+        min_rating = float(m.group(1))
+        t = t[:m.start()] + ' ' + t[m.end():]
+    m = REVIEWS_RE.search(t)
+    if m:
+        min_reviews = int(m.group(1).replace(',', ''))
+        t = t[:m.start()] + ' ' + t[m.end():]
+    return min_rating, min_reviews, t
+
+
 def rule_parse(query):
+    min_rating, min_reviews, query = rating_constraints(query)
     g_lo = g_hi = None
     m = re.search(r'between\s*' + PRICE_NUM + r'\s*(?:and|-|–|to)\s*' + PRICE_NUM, query.casefold())
     if m:
@@ -338,6 +374,14 @@ def rule_parse(query):
     lo = next((c['min_price'] for c in choices if c['min_price'] is not None), g_lo)
     hi = next((c['max_price'] for c in choices if c['max_price'] is not None), g_hi)
     aud = find_audience(query)
+    if aud is None and any(c['types'] and set(c['types']) <= MENS_COMPLEMENTS for c in complements):
+        aud = 'men'  # "a shirt with a matching tie": the outfit is menswear
+    # A trailing occasion ("... for work", "... for summer") describes every choice, not just the last one.
+    if len(choices) > 1:
+        m = re.search(r'\bfor\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ]{2,30})$', choices[-1]['text'].casefold())
+        if m and not find_types(m.group(1))[0] and not find_audience(m.group(1)):
+            for c in choices[:-1]:
+                c['context'] = ' '.join(x for x in (c.get('context'), m.group(0)) if x)
     for c in choices:
         if c['min_price'] is None and c['max_price'] is None:
             c['min_price'], c['max_price'] = lo, hi
@@ -355,6 +399,9 @@ def rule_parse(query):
         choices = typed
     ws = set(words(query)) | {stem(w) for w in words(query)}
     irrelevant_hit = bool(ws & IRRELEVANT_WORDS) and not any(c['types'] for c in choices)
+    irrelevant_hit = irrelevant_hit or bool(UNSUPPORTED_RE.search(query.casefold()))
+    for c in choices:
+        c['min_rating'], c['min_reviews'] = min_rating, min_reviews
     return {'relevant': not irrelevant_hit, 'choices': choices, 'complements': complements, 'source': 'rules'}
 
 
@@ -428,6 +475,12 @@ VIBES = [
      ['tailored blazer', 'tailored suit trousers', 'formal shirt', 'smart blouse']),
     (r'party|night out|clubbing|cocktail|celebration|new year',
      ['party dress', 'sequin top', 'heeled sandals']),
+    (r'old money|quiet luxury|preppy|classy|timeless',
+     ['tailored blazer', 'linen shirt', 'cable-knit sweater', 'chinos', 'polo shirt', 'loafers']),
+    (r'cottagecore|cottage core|prairie',
+     ['floral dress', 'puff-sleeved blouse', 'tiered skirt']),
+    (r'festival|coachella|concert|rave',
+     ['denim shorts', 'crop top', 'bucket hat', 'sunglasses']),
     (r'wedding|reception|festive|gala|prom|ball\b|evening event',
      ['evening dress', 'suit blazer', 'heeled sandals']),
     (r'date night|dinner|romantic',
@@ -450,6 +503,60 @@ VIBES = [
      ['outdoor jacket', 'outdoor trousers', 'boots']),
 ]
 
+# Words the parser relies on for structure; never "correct" them into catalog words ("match" -> "watch").
+PROTECTED_WORDS = {'match', 'matches', 'matching', 'matched', 'pair', 'paired', 'pairs', 'complement', 'complementing',
+                   'complementary', 'coordinating', 'accompany', 'accompanying', 'goes', 'going', 'along', 'alongside',
+                   'something', 'anything', 'cover', 'wear', 'worn', 'also', 'doubles', 'double', 'turns', 'into',
+                   'each', 'both', 'either', 'neither', 'plus', 'with', 'without', 'under', 'over', 'between'}
+
+# "X that is also a sofa", "a dress that doubles as a fridge": a catalog item fused with a non-catalog object.
+CONTRADICTION_RE = re.compile(r"\b(?:that|which|who)\s+(?:is|are|'s)\s+also\b|\balso\s+(?:an?|the)\s+\w+|"
+                              r'\bdoubles?\s+(?:up\s+)?as\b|\b(?:turns?|converts?|transforms?)\s+into\b|'
+                              r'\bat the same time\b|\bhalf\s+\w+\s+half\b')
+
+
+def contradictory(query):
+    """True when the query fuses a product with a non-catalog object via an identity phrase."""
+    t = query.casefold()
+    m = CONTRADICTION_RE.search(t)
+    if not m:
+        return False
+    after = t[m.start():]
+    ws = set(words(after)) | {stem(w) for w in words(after)}
+    return bool(ws & IRRELEVANT_WORDS) and not find_types(t[m.end():])[0]
+
+
+# Style/occasion words -> catalog-grounded descriptive words (all occur in product names/descriptions).
+VIBE_PHRASES = {'old money': 'oldmoney', 'quiet luxury': 'oldmoney', 'old-money': 'oldmoney', 'wedding guest': 'wedding',
+                'date night': 'datenight', 'night out': 'party', 'cocktail party': 'party', 'black tie': 'formal',
+                'smart casual': 'smartcasual', 'business casual': 'smartcasual', 'cottage core': 'cottagecore'}
+VIBE_ATTRS = {
+    'cottagecore': ['floral', 'flower', 'puff', 'smocked', 'smock', 'broderie', 'frill', 'frilled', 'ruffle', 'gingham',
+                    'tiered', 'embroidered', 'lace', 'linen', 'prairie'],
+    'boho': ['embroidered', 'crochet', 'fringe', 'tiered', 'kaftan', 'paisley', 'floral', 'flounce', 'tassel'],
+    'bohemian': ['embroidered', 'crochet', 'fringe', 'tiered', 'kaftan', 'paisley', 'floral', 'flounce', 'tassel'],
+    'oldmoney': ['tailored', 'linen', 'cashmere', 'merino', 'wool', 'cable', 'oxford', 'pleat', 'pleated', 'polo',
+                 'chino', 'blazer', 'loafer', 'pique', 'piqué', 'silk'],
+    'preppy': ['oxford', 'polo', 'cable', 'pleated', 'blazer', 'chino', 'pique', 'piqué', 'argyle', 'collar'],
+    'wedding': ['satin', 'chiffon', 'lace', 'sequin', 'pleated', 'tailored', 'silk', 'velvet', 'embellished', 'beaded'],
+    'festival': ['festival', 'fringe', 'sequin', 'glitter', 'crochet', 'cropped', 'denim', 'bucket', 'tie-dye', 'shimmer'],
+    'datenight': ['satin', 'lace', 'slip', 'wrap', 'velvet', 'chiffon', 'silk', 'draped', 'fitted'],
+    'dinner': ['satin', 'lace', 'wrap', 'velvet', 'chiffon', 'silk', 'draped', 'pleated', 'elegant'],
+    'smartcasual': ['chino', 'oxford', 'polo', 'tailored', 'linen', 'loafer', 'pique', 'knit'],
+    'streetwear': ['oversized', 'graphic', 'cargo', 'printed', 'hoodie', 'jogger', 'boxy'],
+    'minimalist': ['basic', 'plain', 'clean', 'classic', 'simple'],
+    'grunge': ['ripped', 'distressed', 'check', 'flannel', 'washed', 'biker'],
+    'vintage': ['vintage', 'retro', 'washed', 'corduroy', 'check'],
+}
+
+
+def vibe_normalize(text):
+    t = text.casefold()
+    for ph, rep in VIBE_PHRASES.items():
+        t = t.replace(ph, rep)
+    return t
+
+
 INJECTION_RE = re.compile(r'ignore (all |any )?(previous|prior|above)|system prompt|instructions|disregard|'
                           r'return (all|every)|jailbreak|developer mode|print your|reveal')
 
@@ -465,6 +572,7 @@ def vibe_choices(query, base):
                     s[k] = base.get(k) if s.get(k) is None else s[k]
                 s['colors'] = s['colors'] or base.get('colors', [])
                 s['text'] = item
+                s['context'] = query
                 out.append(s)
             return out
     return None
@@ -475,7 +583,7 @@ _rule_parse_core = rule_parse
 
 def rule_parse(query):  # noqa: F811 — wraps the core parser with vibe expansion and injection checks
     r = _rule_parse_core(query)
-    if INJECTION_RE.search(query.casefold()):
+    if INJECTION_RE.search(query.casefold()) or contradictory(query):
         r['relevant'] = False
         return r
     if r['relevant'] and not any(c['types'] for c in r['choices']):

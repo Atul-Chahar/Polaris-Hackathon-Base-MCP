@@ -1,0 +1,357 @@
+[
+ {
+  "id": "ho-r01",
+  "category": "ranking",
+  "arguments": {
+   "query": "navy chinos for men"
+  }
+ },
+ {
+  "id": "ho-r02",
+  "category": "ranking",
+  "arguments": {
+   "query": "satin slip dress"
+  }
+ },
+ {
+  "id": "ho-r03",
+  "category": "ranking",
+  "arguments": {
+   "query": "kids rain jacket"
+  }
+ },
+ {
+  "id": "ho-r04",
+  "category": "ranking",
+  "arguments": {
+   "query": "silver hoop earrings"
+  }
+ },
+ {
+  "id": "ho-r05",
+  "category": "ranking",
+  "arguments": {
+   "query": "oversized grey sweatshirt"
+  }
+ },
+ {
+  "id": "ho-r06",
+  "category": "ranking",
+  "arguments": {
+   "query": "ankle boots for women under 3000"
+  }
+ },
+ {
+  "id": "ho-r07",
+  "category": "ranking",
+  "arguments": {
+   "query": "padded bra in black"
+  }
+ },
+ {
+  "id": "ho-r08",
+  "category": "ranking",
+  "arguments": {
+   "query": "boys swim shorts"
+  }
+ },
+ {
+  "id": "ho-r09",
+  "category": "ranking",
+  "arguments": {
+   "query": "ribbed vest top"
+  }
+ },
+ {
+  "id": "ho-r10",
+  "category": "ranking",
+  "arguments": {
+   "query": "checked flannel shirt"
+  }
+ },
+ {
+  "id": "ho-r11",
+  "category": "ranking",
+  "arguments": {
+   "query": "leather look biker jacket"
+  }
+ },
+ {
+  "id": "ho-r12",
+  "category": "ranking",
+  "arguments": {
+   "query": "wide leg trousers for women"
+  }
+ },
+ {
+  "id": "ho-r13",
+  "category": "ranking",
+  "arguments": {
+   "query": "small black shoulder bag"
+  }
+ },
+ {
+  "id": "ho-r14",
+  "category": "ranking",
+  "arguments": {
+   "query": "sequin skirt"
+  }
+ },
+ {
+  "id": "ho-u01",
+  "category": "unusual",
+  "arguments": {
+   "query": "cottagecore dress"
+  }
+ },
+ {
+  "id": "ho-u02",
+  "category": "unusual",
+  "arguments": {
+   "query": "old money style for men"
+  }
+ },
+ {
+  "id": "ho-u03",
+  "category": "unusual",
+  "arguments": {
+   "query": "what to wear to a wedding as a guest"
+  }
+ },
+ {
+  "id": "ho-u04",
+  "category": "unusual",
+  "arguments": {
+   "query": "clothes for work in the office"
+  }
+ },
+ {
+  "id": "ho-u05",
+  "category": "unusual",
+  "arguments": {
+   "query": "cardigen"
+  }
+ },
+ {
+  "id": "ho-u06",
+  "category": "unusual",
+  "arguments": {
+   "query": "trousres for men"
+  }
+ },
+ {
+  "id": "ho-u07",
+  "category": "unusual",
+  "arguments": {
+   "query": "something warm for a snowy trip"
+  }
+ },
+ {
+  "id": "ho-u08",
+  "category": "unusual",
+  "arguments": {
+   "query": "festival outfit"
+  }
+ },
+ {
+  "id": "ho-m01",
+  "category": "mixed",
+  "arguments": {
+   "query": "a white shirt and black trousers"
+  },
+  "choices": [
+   {
+    "text": "white shirt"
+   },
+   {
+    "text": "black trousers"
+   }
+  ]
+ },
+ {
+  "id": "ho-m02",
+  "category": "mixed",
+  "arguments": {
+   "query": "beanie and scarf for kids"
+  },
+  "choices": [
+   {
+    "text": "kids beanie"
+   },
+   {
+    "text": "kids scarf"
+   }
+  ]
+ },
+ {
+  "id": "ho-m03",
+  "category": "mixed",
+  "arguments": {
+   "query": "sports bra, running shorts and socks"
+  },
+  "choices": [
+   {
+    "text": "sports bra"
+   },
+   {
+    "text": "running shorts"
+   },
+   {
+    "text": "socks"
+   }
+  ]
+ },
+ {
+  "id": "ho-m04",
+  "category": "mixed",
+  "arguments": {
+   "query": "a denim jacket or a bomber jacket"
+  },
+  "choices": [
+   {
+    "text": "denim jacket"
+   },
+   {
+    "text": "bomber jacket"
+   }
+  ]
+ },
+ {
+  "id": "ho-m05",
+  "category": "mixed",
+  "arguments": {
+   "query": "red dress and gold necklace"
+  },
+  "choices": [
+   {
+    "text": "red dress"
+   },
+   {
+    "text": "gold necklace"
+   }
+  ]
+ },
+ {
+  "id": "ho-m06",
+  "category": "mixed",
+  "arguments": {
+   "query": "baby bodysuit and baby socks"
+  },
+  "choices": [
+   {
+    "text": "baby bodysuit"
+   },
+   {
+    "text": "baby socks"
+   }
+  ]
+ },
+ {
+  "id": "ho-c01",
+  "category": "recommendation",
+  "arguments": {
+   "query": "a navy blazer for men with a matching tie",
+   "include_recommendations": true
+  },
+  "complement": {
+   "text": "tie"
+  }
+ },
+ {
+  "id": "ho-c02",
+  "category": "recommendation",
+  "arguments": {
+   "query": "black trousers with a belt to match",
+   "include_recommendations": true
+  },
+  "complement": {
+   "text": "belt"
+  }
+ },
+ {
+  "id": "ho-c03",
+  "category": "recommendation",
+  "arguments": {
+   "query": "a summer dress with matching sandals under 1500",
+   "include_recommendations": true
+  },
+  "complement": {
+   "text": "sandals under 1500"
+  }
+ },
+ {
+  "id": "ho-c04",
+  "category": "recommendation",
+  "arguments": {
+   "query": "a kids hoodie",
+   "include_recommendations": true
+  },
+  "complement": {
+   "text": "complementary item"
+  }
+ },
+ {
+  "id": "ho-c05",
+  "category": "recommendation",
+  "arguments": {
+   "query": "men's formal shirt",
+   "include_recommendations": true
+  },
+  "complement": {
+   "text": "complementary item"
+  }
+ },
+ {
+  "id": "ho-c06",
+  "category": "recommendation",
+  "arguments": {
+   "query": "a bikini with a matching sarong",
+   "include_recommendations": true
+  },
+  "complement": {
+   "text": "sarong"
+  }
+ },
+ {
+  "id": "ho-i01",
+  "category": "irrelevant",
+  "arguments": {
+   "query": "sunglasses that are also a sofa"
+  }
+ },
+ {
+  "id": "ho-i02",
+  "category": "irrelevant",
+  "arguments": {
+   "query": "gaming laptop with RTX 4090"
+  }
+ },
+ {
+  "id": "ho-i03",
+  "category": "irrelevant",
+  "arguments": {
+   "query": "men's jacket under 10 rupees"
+  }
+ },
+ {
+  "id": "ho-i04",
+  "category": "irrelevant",
+  "arguments": {
+   "query": "book a flight to Goa"
+  }
+ },
+ {
+  "id": "ho-i05",
+  "category": "irrelevant",
+  "arguments": {
+   "query": "a dress that is also a refrigerator"
+  }
+ },
+ {
+  "id": "ho-i06",
+  "category": "irrelevant",
+  "arguments": {
+   "query": "qwertyuiop zxcvbnm"
+  }
+ }
+]
