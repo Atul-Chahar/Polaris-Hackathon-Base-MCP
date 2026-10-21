@@ -3,5 +3,3 @@ __pycache__/
 *.py[cod]
 .env
 .DS_Store
-data/emb.npy
-data/emb.meta.json

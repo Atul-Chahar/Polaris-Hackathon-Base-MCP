@@ -408,7 +408,7 @@ class Catalog:
             return True  # LLM judged it relevant and produced a concrete search phrase
         if self.emb is None:
             return hits >= 1
-        return hits >= 1 and float(scores[0]) >= float(os.getenv('ABSTAIN_SIM', '0.62'))
+        return hits >= 1 and float(scores[0]) >= float(os.getenv('ABSTAIN_SIM', '0.73'))
 
     # ------------------------------------------------------------------ recommendations
 

@@ -17,6 +17,9 @@ ENV HF_HUB_OFFLINE=1
 
 # 3) data (products.json, emb.npy, emb.meta.json, ...) - big, rarely changes
 COPY --chown=student:student data/ ./data/
+# If the builder checked out a Git LFS pointer instead of the catalog, fetch the real file and verify it.
+COPY fetch_catalog.py .
+RUN python fetch_catalog.py && chown -R student:student data
 
 # 4) code (small, changes often). Add new top-level dirs here if teammates create them.
 COPY --chown=student:student schemas/ ./schemas/

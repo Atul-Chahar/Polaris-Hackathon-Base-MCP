@@ -34,7 +34,10 @@ async def call_tool(name, arguments):
     return await anyio.to_thread.run_sync(catalog.search, arguments)
 
 
+# MCP_ALLOWED_HOSTS='*' disables Host-header checks (needed behind a load balancer with an unknown hostname).
+_hosts = os.getenv('MCP_ALLOWED_HOSTS', 'localhost:*,127.0.0.1:*,[::1]:*')
 security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=_hosts.strip() != '*',
     allowed_hosts=[h.strip() for h in os.getenv('MCP_ALLOWED_HOSTS',
         'localhost:*,127.0.0.1:*,[::1]:*').split(',') if h.strip()],
     allowed_origins=[o.strip() for o in os.getenv('MCP_ALLOWED_ORIGINS', '').split(',') if o.strip()],
