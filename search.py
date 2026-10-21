@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import threading
+import time
 import unicodedata
 from collections import Counter, defaultdict
 from functools import lru_cache
@@ -772,7 +773,7 @@ class Catalog:
 
     # ------------------------------------------------------------------ recommendations
 
-    def recommend(self, results, arguments, intent=None, primary_ids=()):
+    def recommend(self, results, arguments, intent=None, primary_ids=(), deadline=None):
         if not results:
             return []
         query = arguments.get('query', '').strip()
@@ -806,13 +807,15 @@ class Catalog:
         ctx = self._soft_context(query)
         per = [self._complement_candidates(s, aud, anchor, anchor_colors, exclude, formal, ctx) for s in specs]
         pool = []  # round-robin across requested complement types, best first within each
-        for i in range(5):
+        for i in range(15):  # grade up to 15 so dropping a non-complement never leaves an empty slot
             for lst in per:
                 if i < len(lst) and lst[i] not in pool:
                     pool.append(lst[i])
         pool = pool[:15]
-        grades = (llm_rerank.grade_complements(query or anchor['name'], anchor, [self.products[j] for j in pool])
-                  if len(self.products) >= 1000 else None)
+        budget = llm_rerank.COMPLEMENT_BUDGET if deadline is None else min(llm_rerank.COMPLEMENT_BUDGET,
+                                                                            deadline - time.monotonic())
+        grades = (llm_rerank.grade_complements(query or anchor['name'], anchor, [self.products[j] for j in pool],
+                                               budget) if len(self.products) >= 1000 and budget > 0.3 else None)
         if grades is not None:
             known = [g for g in grades if g is not None]
             if known and max(known) == 0:
@@ -888,7 +891,7 @@ class Catalog:
                 continue
             names.add(name)
             out.append(int(j))
-            if len(out) == 5:
+            if len(out) == 15:  # the first 5 are served without an LLM; the rest back-fill dropped candidates
                 break
         return out
 
@@ -900,7 +903,10 @@ class Catalog:
 
     # ------------------------------------------------------------------ main entry
 
+    REQUEST_BUDGET = float(os.getenv('REQUEST_BUDGET', '5.0'))  # seconds; keeps every call well under 6 s
+
     def search(self, arguments):
+        started = time.monotonic()
         validate_arguments(arguments)
         query = arguments.get('query', '').strip()
         filters = arguments.get('filters', {})
@@ -925,7 +931,8 @@ class Catalog:
         if results and arguments.get('include_recommendations', False):
             rkey = ('rec', query, json.dumps(filters, sort_keys=True), tuple(r['id'] for r in results))
             if rkey not in self._cache:  # identical requests must return identical recommendations
-                self._cache[rkey] = self.recommend(results, arguments, intent)
+                self._cache[rkey] = self.recommend(results, arguments, intent,
+                                                   deadline=started + self.REQUEST_BUDGET)
             recs = self._cache[rkey]
         return {'results': results, 'recommendations': recs}
 

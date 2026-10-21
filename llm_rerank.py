@@ -120,7 +120,7 @@ def grade_primary(request, products):
     return _grade(SYSTEM, prompt, len(products), PRIMARY_BUDGET)
 
 
-def grade_complements(request, anchor, products):
+def grade_complements(request, anchor, products, budget=None):
     """0-3 complement grade per candidate for the anchor product, or None if the LLM is unavailable."""
     if not enabled() or not products:
         return None
@@ -128,7 +128,7 @@ def grade_complements(request, anchor, products):
     keys = ', '.join(f'"{k}": g' for k in range(len(products)))
     prompt = (f"Shopping request: {request}\n\nPRIMARY: {fact_line('P', anchor)}\n\nCandidates:\n{lines}\n\n"
               f"Return JSON only, no prose, with a grade for every candidate number: {{{keys}}}")
-    return _grade(COMPLEMENT_SYSTEM, prompt, len(products), COMPLEMENT_BUDGET)
+    return _grade(COMPLEMENT_SYSTEM, prompt, len(products), COMPLEMENT_BUDGET if budget is None else budget)
 
 
 def submit(fn, *args):
