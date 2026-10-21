@@ -1,0 +1,24 @@
+== unit
+OK
+== smoke
+PASS: MCP initialization, exact schemas, structured JSON responses, search, and validation
+== dev set
+validity          41   1.000    25.00    25
+ranking           22   0.974    29.23    30
+unusual           10   0.980     7.35   7.5
+irrelevant        10   1.000     7.50   7.5
+mixed             12   0.991    14.87    15
+recommendation    10   1.000    10.00    10
+TOTAL                           93.94  95.0   (functional; perf scored by eval/perf.py)
+latency over 155 calls: p50=39ms p95=171ms max=418ms judge=heuristic
+== rec phrasing
+TOTAL 150/150
+== mixed phrasing
+TOTAL 96/96
+== typos
+typo matrix 266/300
+== synthetic
+ALL               400    0.880      4
+== speed
+ALL 100 calls: p50=39ms p95=87ms correct=100.0% error_rate=0.0%
+performance points (if eligible: functional>=85.5 and correct>=95%): 5.00 / 5

@@ -517,8 +517,35 @@ PRICE_IS_RE = re.compile(r'\b(?:costs?|costing|priced at|at a price of|worth|for
                          r'\b(?:costs?|costing|priced at|at a price of|worth)\s*(?:rs\.?|inr|₹)?\s*(\d[\d,]*)')
 
 
+# Fabric / material words. A material with (almost) no support in the catalog text is "insufficient evidence".
+MATERIAL_WORDS = {'cashmere', 'silk', 'leather', 'wool', 'linen', 'cotton', 'polyester', 'denim', 'velvet', 'satin',
+                  'suede', 'fur', 'alpaca', 'mohair', 'merino', 'bamboo', 'hemp', 'nylon', 'spandex', 'lycra',
+                  'elastane', 'rayon', 'viscose', 'modal', 'tencel', 'lyocell', 'acrylic', 'angora', 'pashmina',
+                  'khadi', 'chiffon', 'georgette', 'organza', 'tulle', 'latex', 'pvc', 'vinyl', 'neoprene', 'corduroy',
+                  'tweed', 'flannel', 'fleece', 'cordura', 'jute', 'muslin', 'crepe', 'taffeta', 'brocade', 'chanderi',
+                  'banarasi', 'ikat', 'tussar', 'mulmul', 'goretex', 'gore-tex', 'kevlar', 'vicuna', 'mink', 'sable',
+                  'chinchilla', 'ostrich', 'python-skin', 'crocodile-skin', 'snakeskin', 'kanjeevaram', 'kanchipuram',
+                  'bandhani', 'phulkari', 'chikankari', 'zari', 'zardozi', 'kalamkari', 'patola', 'paithani', 'cupro',
+                  'qiviut', 'yak', 'llama', 'camel-hair', 'tyvek', 'dyneema', 'polartec', 'thinsulate', 'coolmax'}
+SIZE_DEADLINE_DEAL_RE = re.compile(
+    r'\b(?:uk|eu|euro)\s*(?:size\s*)?\d{1,2}(?:\.\d)?\b|\bus\s*size\s*\d|\b(?:2[89]|3\d|4[0-4])(?:aa|a|b|c|d|dd|ddd|e|f|g)\b|'
+    r'\b(?:2[89]|3\d|4[0-4]) (?:dd|ddd)\b|\bcup size\b|'
+    r'\bby (?:tomorrow|tonight|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week)\b|'
+    r'\bwithin \d+ (?:hours?|days?)\b|\bnext[- ]day\b|\bexpress (?:delivery|shipping)\b|\bovernight (?:delivery|shipping)\b|'
+    r'\b\d+\s*%\s*off\b|\bbuy one get one\b|\bbogo\b|\bcash ?back\b|\bdeal of the day\b|\bfree (?:gift|sample)s?\b|'
+    r'\bfree\s+(?:t-?shirts?|tees?|dress(?:es)?|clothes|clothing|shoes|stuff|items?|products?|jeans|bags?)\b|\bfor free\b|\bfree of (?:cost|charge)\b|\bat no cost\b|\bcosts? nothing\b|'
+    r'\b(?:handmade|hand-made|handcrafted|hand-stitched|tailor-made|made to measure|custom-made|bespoke|personali[sz]ed|'
+    r'monogram\w*|engraved)\b')
+
+
 def impossible(query):
     t = query.casefold()
+    if SIZE_DEADLINE_DEAL_RE.search(t):
+        return True  # sizes, deadlines, deals and custom work are not recorded in the catalog
+    m = re.search(r'\bmade in ([a-z]+)\b', t)
+    if m and m.group(1) not in MATERIAL_WORDS and m.group(1) not in STOP and m.group(1) not in COLOR_WORDS \
+            and m.group(1) not in ('soft', 'organic', 'recycled', 'pure', 'premium', 'fine', 'thick', 'thin', 'stretch'):
+        return True  # country of origin is not recorded ("jeans made in Italy"); "made in cotton" is a material
     if find_audience(t) == 'men' or re.search(r"\bmen'?s\b|\bfor (?:men|him|my (?:husband|boyfriend|dad|brother))\b", t):
         if MEN_ONLY_IMPOSSIBLE_RE.search(t):
             return True  # the catalog has no menswear bikinis, lingerie or maternity wear

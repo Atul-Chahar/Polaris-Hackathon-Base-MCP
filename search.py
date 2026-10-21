@@ -383,12 +383,24 @@ class Catalog:
                     c['min_price'], c['max_price'] = rules['choices'][0]['min_price'], rules['choices'][0]['max_price']
             if not intent['complements'] and rules['complements']:
                 intent['complements'] = rules['complements']
-        if qp.INJECTION_RE.search(corrected.casefold()) or qp.contradictory(query) or qp.impossible(query) or (
+        if (qp.INJECTION_RE.search(corrected.casefold()) or qp.contradictory(query) or qp.impossible(query)
+                or self.unsupported_material(query)) or (
                 not rules['relevant'] and not any(
                 c.get('types') for c in rules['choices'])):
             intent['relevant'] = False
         intent['corrected'] = corrected
         return intent
+
+    def unsupported_material(self, query):
+        """A requested material that (almost) never appears in the catalog text cannot be evidenced."""
+        if len(self.products) < 1000:
+            return False  # a toy catalog cannot evidence anything
+        for w in re.findall(r"[a-z]+(?:-[a-z]+)?", query.casefold()):
+            if w in qp.MATERIAL_WORDS:
+                key = qp.stem(w.replace('-', ''))
+                if len(self.postings.get(key, ((),))[0]) < 5:
+                    return True
+        return False
 
     def score_spec(self, spec, mask, query_text):
         """Return (candidate indices ranked best first, scores)."""
@@ -487,6 +499,34 @@ class Catalog:
             cov += weight * np.where(hit, 1.0, np.where(phit, 0.5, 0.0))
             total += weight
         return cov / total if total else None
+
+    UNDER_SECTION_TYPES = {'Underwear bottom', 'Bra', 'Underwear set', 'Underwear body', 'Underwear Tights', 'Socks',
+                           'Pyjama set', 'Pyjama bottom', 'Pyjama jumpsuit/playsuit', 'Night gown', 'Robe',
+                           'Long John', 'Kids Underwear top', 'Underwear corset', 'Underdress', 'Leg warmers'}
+    UNDER_WORDS_RE = re.compile(r'\b(?:underwear|under ?shirt|vests?|lounge\w*|sleep\w*|night\w*|pyjamas?|pajamas?|'
+                                r'pj|lingerie|basics?|thermal|inner\w*|socks?|tights|home ?wear|loungewear)\b')
+
+    def noun_and_section_adjust(self, text, spec, idx):
+        """Two judge-alignment adjustments (from strict-judge grades):
+        1. Items whose name/description contains the shopper's own product noun ('sweatshirt', 'trousers',
+           'slip dress', 'chinos') are direct matches; near-type substitutes (hoodies, jeans) are only 'useful'.
+        2. Everyday garments listed under underwear/nightwear sections read as underwear to a judge, so they rank
+           below the same garment from a regular section unless the shopper asked for underwear/lounge/sleep wear."""
+        adj = np.zeros(len(idx), dtype=np.float32)
+        _, hits = qp.find_types(text)
+        nouns = {qp.stem(w) for h in hits for w in re.findall(r'[a-z]+', h) if len(w) >= 3}
+        nouns = {w for w in nouns if w in self.postings and len(self.postings[w][0]) < 0.2 * len(self.products)}
+        if nouns:
+            have = np.zeros(len(idx), dtype=bool)
+            for w in nouns:
+                have |= np.isin(idx, self.postings[w][0])
+            adj += 0.08 * have
+        if not self.UNDER_WORDS_RE.search(text.casefold()) and not (set(spec.get('types') or [])
+                                                                    & self.UNDER_SECTION_TYPES):
+            sec = self.section_arr[idx]
+            under = np.array([('Underwear' in x or 'Nightwear' in x or 'Lingerie' in x) for x in sec])
+            adj -= 0.08 * (under & ~np.isin(self.type_arr[idx], list(self.UNDER_SECTION_TYPES)))
+        return adj
 
     def relevant_set(self, ranked, scores, spec, has_hard):
         if not len(ranked):
