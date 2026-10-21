@@ -147,6 +147,7 @@ class Catalog:
         self.emb = embeddings
         self.emb_desc = None
         self._embedder = None
+        self._real_words = None
         self._emb_lock = threading.Lock()
         self.use_llm = use_llm if use_llm is not None else os.getenv('LLM_PROVIDER', '') != 'none'
         self._cache = {}
@@ -193,7 +194,14 @@ class Catalog:
         post = defaultdict(lambda: ([], []))
         lengths = np.zeros(len(self.products), dtype=np.float32)
         vocab = Counter()
+        self.fact_df = Counter()  # products using a word outside the name (description, type, attributes)
+        self.name_post = defaultdict(list)  # word -> products whose name uses it
         for i, p in enumerate(self.products):
+            facts = set(stoks(' '.join(str(p.get(k) or '') for k in (
+                'description', 'product_type', 'category', 'section', 'color', 'pattern'))))
+            self.fact_df.update(facts)
+            for w in set(stoks(p['name'])):
+                self.name_post[w].append(i)
             bag = Counter()
             for w in stoks(p['name']):
                 bag[w] += 3
@@ -252,8 +260,15 @@ class Catalog:
             # Rare catalog word (e.g. a misspelt product name): only snap to a much more common product/color word.
             strong = [c for c in self._typo_candidates(w) if (c in qp.TYPE_WORDS or qp.stem(c) in qp.TYPE_WORDS
                       or c in qp.COLOR_WORDS) and self.vocab.get(c, 0) + self.vocab.get(qp.stem(c), 0) > 20 * freq]
-            return max(strong, key=lambda c: (self.vocab.get(qp.stem(c), 0), c)) if strong else w
-        return self._best_candidate(w)
+            best = max(strong, key=lambda c: (self.vocab.get(qp.stem(c), 0), c)) if strong else w
+        else:
+            best = self._best_candidate(w)
+        if best != w and w in self.real_words() and not (
+                best in qp.TYPE_WORDS or qp.stem(best) in qp.TYPE_WORDS or best in self.TYPE_TOKENS):
+            # A real English word ('live', 'system') is only a typo for a product noun ('boost' -> boots,
+            # 'swear' -> sweater), never for a colour or another catalog word ('live' -> olive).
+            return self._type_word_within2(w, skip=self.ATTR_SKIP)
+        return best
 
     def _typo_candidates(self, w):
         cands = set()
@@ -269,17 +284,17 @@ class Catalog:
     def _best_candidate(self, w):
         cands = self._typo_candidates(w)
         if not cands:
-            return self._type_word_within2(w)
+            return self._type_word_within2(w, skip=self.ATTR_SKIP)
         return max(cands, key=lambda c: (c in qp.TYPE_WORDS or qp.stem(c) in qp.TYPE_WORDS or c in qp.COLOR_WORDS,
                                          self.vocab.get(c, 0) + self.vocab.get(qp.stem(c), 0), c))
 
-    def _type_word_within2(self, w):
+    def _type_word_within2(self, w, skip=()):
         """Second pass for unknown words of 5+ letters: a product noun within two edits ('swaer', 'cadign', 'pjams')."""
         if len(w) < 5:
             return w
         best, best_d = w, 3
         for t in self.TYPE_TOKENS:
-            if abs(len(t) - len(w)) > 2 or t[0] != w[0] and t[-1] != w[-1]:
+            if t in skip or abs(len(t) - len(w)) > 2 or t[0] != w[0] and t[-1] != w[-1]:
                 continue
             d = _osa(w, t)
             if d < best_d or (d == best_d and best != w and len(t) < len(best)):
@@ -302,14 +317,33 @@ class Catalog:
             scores[d] += s
         return scores
 
-    def _embed_query(self, text):
-        if self.emb is None:
-            return None
+    def _load_embedder(self):
         with self._emb_lock:
             if self._embedder is None:
                 from fastembed import TextEmbedding
                 self._embedder = TextEmbedding(EMB_MODEL)
-            v = next(iter(self._embedder.query_embed([text])))
+            return self._embedder
+
+    def real_words(self):
+        """Whole-word entries of the embedding model's WordPiece vocabulary: common English words. Misspellings
+        ('jackt', 'trousrs', 'tshrit') are split into pieces, so they are never in this set."""
+        if self._real_words is None:
+            words = set()
+            if self.emb is not None:
+                try:
+                    vocab = self._load_embedder().model.tokenizer.get_vocab()
+                    words = {w for w in vocab if w.isalpha() and w.isascii()}
+                except Exception:
+                    words = set()
+            self._real_words = words
+        return self._real_words
+
+    def _embed_query(self, text):
+        if self.emb is None:
+            return None
+        embedder = self._load_embedder()
+        with self._emb_lock:
+            v = next(iter(embedder.query_embed([text])))
         v = np.asarray(v, dtype=np.float32)
         return v / (np.linalg.norm(v) or 1.0)
 
@@ -676,7 +710,18 @@ class Catalog:
         ws = [w for w in re.findall(r'[a-z]+', query.casefold()) if w not in qp.STOP and len(w) > 2]
         if any(w in qp.IRRELEVANT_WORDS or qp.stem(w) in qp.IRRELEVANT_WORDS for w in ws):
             return False
-        hits = sum(1 for w in ws if qp.stem(w) in self.postings)
+        # Name words are style labels ('Onion cardigan', 'Olive tee'), so a word only evidences a request when at
+        # least 5 products use it in their facts (same threshold as unsupported_material), or when one product's
+        # name contains every word of the request (a product looked up by name: 'Cogan 3pk', 'Studio perfume').
+        hits = sum(1 for w in ws if self.fact_df.get(qp.stem(w), 0) >= 5)
+        if not hits and ws:
+            named = None
+            for w in ws:
+                ids = set(self.name_post.get(qp.stem(w), ()))
+                named = ids if named is None else named & ids
+                if not named:
+                    break
+            hits = int(bool(named))
         if spec.get('_hits') is None and spec.get('text'):
             return True  # LLM judged it relevant and produced a concrete search phrase
         if self.emb is None:
