@@ -473,6 +473,7 @@ def rule_parse(query):
         if len(priced) == 1:
             for c in choices:
                 c['min_price'], c['max_price'] = priced[0]['min_price'], priced[0]['max_price']
+                c['_budget_inherited'] = True  # written in the accompanying item's clause
     # Drop choices that carry no product type when another choice has one (stray adjectives).
     if any(c['types'] for c in choices):
         typed = [c for c in choices if c['types']]

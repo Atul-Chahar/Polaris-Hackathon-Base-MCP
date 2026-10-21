@@ -573,10 +573,16 @@ class Catalog:
             return self._cache[key]
         intent = self.parse(query)
         base = self.filter_mask(filters)
-        lists, out, pools = [], [], []
+        lists, out, pools, used = [], [], [], []
         if intent.get('relevant', True) and intent['choices']:
             for spec in intent['choices']:
                 mask = self.spec_mask(spec, filters, base)
+                if spec.get('_budget_inherited') and not mask.any():
+                    # The budget was written after the accompanying item ("a coat with a matching scarf under
+                    # 1000"). Per-item reading binds the main item too, but when no main item can meet it the
+                    # shopper meant the accompanying item only, so keep the main item unbudgeted.
+                    spec = {**spec, 'min_price': None, 'max_price': None, '_budget_relaxed': True}
+                    mask = self.spec_mask(spec, filters, base)
                 # Mixed choices and requests with a split-off complement score on their own segment text only.
                 single = len(intent['choices']) == 1 and not intent.get('complements')
                 ranked, scores = self.score_spec(spec, mask, intent['corrected'] if single else '')
@@ -585,7 +591,8 @@ class Catalog:
                     continue
                 lists.append(self.relevant_set(ranked, scores, spec, has_hard))
                 pools.append(self.alt_candidates(spec, mask, intent['corrected'] if single else ''))
-            lists = self.llm_rerank(query, intent, lists, pools)
+                used.append(spec)
+            lists = self.llm_rerank(query, {**intent, 'choices': used}, lists, pools)
             seen = set()
             for i in range(max((len(l) for l in lists), default=0)):
                 for l in lists:
@@ -636,7 +643,8 @@ class Catalog:
             head = [self.products[j] for j in ids]
             if intent.get('complements'):
                 # grade the main item only; the accompanying item is judged separately as a recommendation
-                request = f"{spec.get('text') or query} (main item of the request: {query})"
+                scope = '; its budget applies to the accompanying item only' if spec.get('_budget_relaxed') else ''
+                request = f"{spec.get('text') or query} (main item of the request: {query}{scope})"
             elif multi:
                 request = f"{query} (this list is for: {spec.get('text') or query})"
             else:

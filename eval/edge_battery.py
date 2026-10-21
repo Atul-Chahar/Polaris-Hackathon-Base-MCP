@@ -20,7 +20,8 @@ dress under 50 rupees|a kurta for diwali|leather sofa|pashmina shawl|khadi kurta
 spandex leggings|angora sweater|banarasi silk saree|kevlar jacket|sneakers in UK 8|a 34B bra|bra in 36 DD|
 sneakers in us size 10|a dress by tomorrow|t-shirts with 50% off|a free t-shirt|jeans made in Italy|
 handmade leather bag|a monogrammed tie|a dress with 20 reviews|latex dress|muslin baby wrap|
-dress with express delivery|a dress made in china|<script>alert(1)</script>|SELECT * FROM products|?|!!!|123|the"""
+dress with express delivery|a dress made in china|<script>alert(1)</script>|SELECT * FROM products|?|!!!|123|the|
+a jacket under 1000 with a matching scarf"""
 RETURN = """women's bikini|a bra|maternity jeans|men's boxer briefs|men's swim shorts|black boots|boots for men|
 a dress for rs 2000|a dress that costs 1500|side table|chocolate brown sweater|a cake print t-shirt|
 desk lamp shaped earrings|mama jeans|gloves|red party dress under 2000|something comfy for a lazy Sunday|jeens|
@@ -45,7 +46,9 @@ pyjamas for dad, mom and kids|innerwear for men|muffler|chappals|nighty|palazzo 
 something to keep my head warm|something for my feet at the beach|something for my neck in winter|
 something to protect my eyes from the sun|a hoodie and something warm for my head|gift for my wife|
 gift for my husband|something for my 3 year old daughter|clothes for my dad|something cute for a toddler|
-a present for a teenage boy|stuff for a newborn baby boy|pink bootie for children|bootie for kids"""
+a present for a teenage boy|stuff for a newborn baby boy|pink bootie for children|bootie for kids|
+a winter coat with a matching scarf under 1000|a blazer with a matching belt under 800|
+a leather jacket with matching sunglasses under 1500"""
 
 
 def main():
