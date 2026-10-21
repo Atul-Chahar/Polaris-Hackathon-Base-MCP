@@ -546,6 +546,8 @@ class Catalog:
         formal = (anchor['product_type'] in FORMAL_TYPES or any(w in anchor['section'] for w in ('Tailoring', 'Suits'))
                   or bool(re.search(r'\b(?:formal|suit|office|business|interview|wedding|work)\b', query.casefold())))
         specs = [dict(c) for c in intent.get('complements', [])]
+        if not specs and intent.get('complement_requested'):
+            return []  # the requested accompanying item does not exist in the catalog
         if not specs and re.search(r'accessor', query.casefold()):
             for t in ACCESSORIES_FOR.get(anchor['product_type'], ['Bag', 'Belt', 'Earring', 'Necklace', 'Sunglasses']):
                 specs.append({'text': t, 'types': [t], 'colors': [], 'audience': None,

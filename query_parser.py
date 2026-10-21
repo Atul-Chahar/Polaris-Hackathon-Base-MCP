@@ -400,9 +400,26 @@ def rule_parse(query):
     ws = set(words(query)) | {stem(w) for w in words(query)}
     irrelevant_hit = bool(ws & IRRELEVANT_WORDS) and not any(c['types'] for c in choices)
     irrelevant_hit = irrelevant_hit or bool(UNSUPPORTED_RE.search(query.casefold()))
+    irrelevant_hit = irrelevant_hit or bool(NO_EVIDENCE_RE.search(query.casefold()))
     for c in choices:
         c['min_rating'], c['min_reviews'] = min_rating, min_reviews
-    return {'relevant': not irrelevant_hit, 'choices': choices, 'complements': complements, 'source': 'rules'}
+    # An explicitly requested accompanying item that the catalog cannot supply ("matching earphones") means
+    # no recommendation should be forced.
+    low = query.casefold()
+    requested = bool(COMPLEMENT_RE.search(low) or TRAILING_COMP_RE.search(low))
+    return {'relevant': not irrelevant_hit, 'choices': choices, 'complements': complements, 'source': 'rules',
+            'complement_requested': requested}
+
+
+# Facts the catalog does not record: other brands, sizes, stock, delivery, payment and discounts.
+NO_EVIDENCE_RE = re.compile(
+    r"\b(?:nike|adidas|puma|reebok|gucci|prada|zara|levi'?s|uniqlo|chanel|louis vuitton|dior|versace|armani|"
+    r'calvin klein|tommy hilfiger|ralph lauren|lacoste|rolex|ray-?ban|converse|vans|new balance|under armou?r|fila|'
+    r'skechers|crocs|birkenstock|dr\.? martens|hermes|hermès|balenciaga|burberry|fendi|shein|forever 21|'
+    r'size\s*(?:\d+|xx?s|x{0,3}l|s|m)|(?:xxs|xs|xxl|xxxl|[2-5]xl)|\d+\s*(?:inch|cm|in)\s*waist|waist\s*\d+|'
+    r'delivery|deliver(?:ed)?|shipping|ship(?:ped)? (?:by|to|today|tomorrow)|in stock|out of stock|available (?:today|'
+    r'tomorrow|now|in)|same[- ]day|cash on delivery|\bcod\b|emi|coupon|promo code|discount(?:ed)?|on sale|clearance|'
+    r'refund|return policy|warranty|exchange policy)\b')
 
 
 # ---------------------------------------------------------------- LLM parser
