@@ -334,6 +334,9 @@ class Catalog:
                     c['min_price'], c['max_price'] = rules['choices'][0]['min_price'], rules['choices'][0]['max_price']
             if not intent['complements'] and rules['complements']:
                 intent['complements'] = rules['complements']
+        if qp.INJECTION_RE.search(corrected.casefold()) or (not rules['relevant'] and not any(
+                c.get('types') for c in rules['choices'])):
+            intent['relevant'] = False
         intent['corrected'] = corrected
         return intent
 
@@ -348,7 +351,7 @@ class Catalog:
         sem = self.semantic(spec.get('text') or query_text)
         if sem is not None:
             s = sem[idx]
-            score = 0.65 * s + 0.35 * lex_n * 0.3 + 0.1 * lex_n
+            score = 0.75 * s + 0.25 * lex_n
         else:
             score = lex_n
         if spec.get('audience') not in ('kids', 'boys', 'girls', 'baby'):

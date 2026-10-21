@@ -12,18 +12,16 @@ MODEL = 'BAAI/bge-small-en-v1.5'
 
 
 def doc_text(p):
-    return (f"{p['name']}. {p.get('description') or ''} Type: {p['product_type']}. "
-            f"Category: {p['category']}. For: {p['audience']}, {p['section']}. "
-            f"Color: {p['color']}. Pattern: {p['pattern']}.")
+    return f"{p['name']}, {p['color']} {p['pattern']} {p['product_type']}, {p['section']}"
 
 
 def main(out=ROOT / 'data/emb.npy'):
     products = sorted(json.loads((ROOT / 'data/products.json').read_text(encoding='utf-8')), key=lambda p: p['id'])
     texts = [doc_text(p) for p in products]
-    unique = sorted(set(texts))
+    unique = sorted(set(texts), key=len)
     where = {t: i for i, t in enumerate(unique)}
     print(f'{len(texts)} products, {len(unique)} unique docs', flush=True)
-    model = TextEmbedding(MODEL, threads=8)
+    model = TextEmbedding(MODEL, threads=6)
     start, vecs = time.time(), []
     for i, v in enumerate(model.embed(unique, batch_size=128)):
         vecs.append(v)
