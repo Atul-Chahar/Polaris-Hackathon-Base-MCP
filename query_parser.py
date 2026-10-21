@@ -502,7 +502,8 @@ NON_CATALOG2_RE = re.compile(r'\bpower ?banks?\b|\bgift ?cards?\b|\b(?:dining|co
                              r'\bboxing gloves\b|\bsupplements?\b|\bvitamins?\b')
 # Non-catalog nouns that are also used as colours or prints ("chocolate brown", "cake print"): empty only when the
 # query names no catalog product.
-NON_CATALOG_WEAK_RE = re.compile(r'\bdrones?\b|\bcakes?\b|\bchocolates?\b|\bprotein\b|\bvouchers?\b|\bsubscriptions?\b|'
+NON_CATALOG_WEAK_RE = re.compile(r'\bnear me\b|\bclasses\b|\bmemberships?\b|\bapps?\b|\bbookings?\b|\bcourses?\b|'
+                                 r'\blessons?\b|\btutorials?\b|\bdrones?\b|\bcakes?\b|\bchocolates?\b|\bprotein\b|\bvouchers?\b|\bsubscriptions?\b|'
                                  r'\bdesks?\b|\bgoggles\b|\bhelmets?\b|\bearbuds\b|\bair ?pods\b|\bconsoles?\b|'
                                  r'\bplaystation\b|\bxbox\b|\bnintendo\b|\bpower\b')
 PRICE_IS_RE = re.compile(r'\b(?:costs?|costing|priced at|at a price of|worth|for)\s*(?:rs\.?|inr|₹)\s*(\d[\d,]*)|'
@@ -731,6 +732,23 @@ def rule_parse(query):  # noqa: F811 — wraps the core parser with vibe expansi
     if r['relevant'] and not any(c['types'] for c in r['choices']):
         base = r['choices'][0] if r['choices'] else {}
         v = vibe_choices(query, base)
-        if v:
+        if v and not APPAREL_CUE_RE.search(query.casefold()) and not only_vibe_words(query):
+            # An occasion with no clothing cue ("gym membership", "wedding venue", "party balloons") is not a
+            # request for this catalog.
+            r['relevant'] = False
+            r['choices'] = []
+        elif v:
             r['choices'] = v
     return r
+
+
+def only_vibe_words(query):
+    """'beach holiday', 'lazy sunday', 'gym': every content word is an occasion word, so it is a clothing request."""
+    content = [w for w in words(query) if w not in STOP and len(w) > 2]
+    return bool(content) and all(any(re.search(p, w) for p, _ in VIBES) for w in content)
+
+
+APPAREL_CUE_RE = re.compile(r'\b(?:wear|wearing|worn|outfits?|clothes|clothing|attire|apparel|garments?|looks?|style|'
+                            r'styled|dressed|dress up|kit|gear|put on|pack|packing|gifts?|present|comfy|cozy|cosy|'
+                            r'comfortable|warm|cute|chic|stylish|smart|casual|formal|trendy|something|anything|ideas?|'
+                            r'what to|what should|for (?:my|a|the) (?:baby|newborn|son|daughter|wife|husband|kid))\b')
