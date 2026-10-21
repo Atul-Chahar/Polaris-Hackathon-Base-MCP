@@ -285,9 +285,58 @@ TRAILING_COMP_RE = re.compile(r'\b(?:to match|to complement|that goes? with (?:i
                               r'coordinating|complementary)\b')
 
 
+CLAUSE_BOUNDARY_RE = re.compile(r'[;.?!]+\s*|,\s*(?:and\s+)?|\s+and\s+(?=(?:also\s+|then\s+|please\s+)?(?:recommend|'
+                                r'suggest|show|find|add|include|pick|what|which)\b)')
+REC_CLAUSE_RE = re.compile(r'\b(?:recommend\w*|suggest\w*|propose|what|which|any|also|add|include|pick)\b|'
+                           r'\b(?:match(?:es|ing)?|go(?:es)?(?: well)? with|wear with|pair(?:ed|s)?(?: well)? with|'
+                           r'complement\w*|coordinat\w*|complete (?:the|my) look|accessori[sz]e)\b')
+COMP_WITH_RE = re.compile(r'\b(?:paired with|pair it with|along with|alongside|together with|teamed with|with)\s+'
+                          r'(?:an?\s+|some\s+|the\s+|a pair of\s+|pair of\s+)?')
+COMP_TAIL_RE = re.compile(r'\b(?:to complete the look|to complete (?:the|my) outfit|that (?:would )?(?:go|goes|match|'
+                          r'matches|look) (?:well )?(?:with (?:it|them|this))?|to (?:go|wear|pair) with (?:it|them|this)|'
+                          r'to match|would (?:go|match|look good)(?: with (?:it|them))?|would match)\b')
+
+
+def _split_complements(text):
+    """General complement detection. Returns (primary_segments, complement_segments) or None.
+
+    1. Clause rule: a later clause that names a product and asks to recommend / suggest / match it
+       ("..., and recommend a tie", "...; also suggest a bag", "... . What belt would match?").
+    2. Accompaniment rule: "X with / paired with / along with Y" where Y is a different product type from X.
+    A plain "X and Y" stays a mixed search, as the brief requires."""
+    low = text.casefold()
+    cuts = [0] + [m.end() for m in CLAUSE_BOUNDARY_RE.finditer(low)] + [len(low)]
+    spans = [(cuts[i], cuts[i + 1]) for i in range(len(cuts) - 1) if low[cuts[i]:cuts[i + 1]].strip()]
+    first = next((k for k, (a, b) in enumerate(spans) if find_types(low[a:b])[0]), None)
+    if first is not None:
+        ptypes = set(find_types(low[spans[first][0]:spans[first][1]])[0])
+        comps = [(a, b) for a, b in spans[first + 1:]
+                 if find_types(low[a:b])[0] and REC_CLAUSE_RE.search(low[a:b])
+                 and not set(find_types(low[a:b])[0]) <= ptypes]
+        if comps:
+            primary = ' '.join(text[a:b] for k, (a, b) in enumerate(spans) if (a, b) not in comps)
+            return [primary], [_clean_comp(text[a:b]) for a, b in comps]
+    for w in COMP_WITH_RE.finditer(low):
+        before, after = low[:w.start()], low[w.end():]
+        bt, at = find_types(before)[0], find_types(after)[0]
+        if bt and at and set(at).isdisjoint(bt):
+            comp = text[w.end():]
+            parts = [p for p in re.split(r'\s*(?:,|;|\band\b|&|\bplus\b)\s*', comp) if p.strip()]
+            parts = [_clean_comp(p) for p in parts if find_types(p)[0]] or [_clean_comp(comp)]
+            return [text[:w.start()]], parts
+    return None
+
+
+def _clean_comp(segment):
+    return re.sub(COMP_TAIL_RE, ' ', segment, flags=0).strip(' ,')
+
+
 def _segments(text):
     """Split a query into primary choice segments and complement segments."""
     low = text.casefold()
+    split = _split_complements(text)
+    if split:
+        return split
     # "swimsuit with something to cover up", "jeans and something to go with them": the vague part is a complement.
     m = re.search(r'\bwith\s+(?:something|anything)\b|\b(?:and|plus)\s+(?:something|anything)(?=\s+(?:to go|to match|'
                   r'matching|to wear with|that goes|to pair|to complement|to cover))', low)
@@ -467,7 +516,7 @@ NO_EVIDENCE_RE = re.compile(
     r"\b(?:nike|adidas|puma|reebok|gucci|prada|zara|levi'?s|uniqlo|chanel|louis vuitton|dior|versace|armani|"
     r'calvin klein|tommy hilfiger|ralph lauren|lacoste|rolex|ray-?ban|converse|vans|new balance|under armou?r|fila|'
     r'skechers|crocs|birkenstock|dr\.? martens|hermes|hermès|balenciaga|burberry|fendi|shein|forever 21|'
-    r'size\s*(?:\d+|xx?s|x{0,3}l|s|m)|(?:xxs|xs|xxl|xxxl|[2-5]xl)|\d+\s*(?:inch|cm|in)\s*waist|waist\s*\d+|'
+    r'size\s*\d+|size\s+(?:xx?s|x{0,3}l|s|m)\b|(?:xxs|xs|xxl|xxxl|[2-5]xl)|\d+\s*(?:inch|cm|in)\s*waist|waist\s*\d+|'
     r'delivery|deliver(?:ed)?|shipping|ship(?:ped)? (?:by|to|today|tomorrow)|in stock|out of stock|available (?:today|'
     r'tomorrow|now|in)|same[- ]day|cash on delivery|\bcod\b|emi|coupon|promo code|discount(?:ed)?|on sale|clearance|'
     r'refund|return policy|warranty|exchange policy)\b')
