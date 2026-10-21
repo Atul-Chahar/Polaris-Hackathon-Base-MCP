@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import threading
+import unicodedata
 from collections import Counter, defaultdict
 from functools import lru_cache
 from pathlib import Path
@@ -66,6 +67,16 @@ COMPLEMENT_MAP = {
     'Pumps': ['Bag', 'Dress', 'Earring'], 'Earring': ['Necklace', 'Bracelet', 'Ring'],
     'Necklace': ['Earring', 'Bracelet', 'Ring'], 'Tie': ['Shirt', 'Blazer'], 'Belt': ['Trousers', 'Shirt'],
     'Scarf': ['Gloves', 'Hat/beanie', 'Coat'], 'Hat/beanie': ['Scarf', 'Gloves'], 'Dungarees': ['T-shirt', 'Sneakers'],
+    'Socks': ['Sneakers', 'Boots'], 'Ballerinas': ['Dress', 'Bag', 'Skirt'], 'Flat shoe': ['Trousers', 'Bag', 'Socks'],
+    'Other shoe': ['Socks', 'Trousers', 'Belt'], 'Slippers': ['Pyjama set', 'Robe'], 'Flip flop': ['Swimsuit', 'Shorts',
+    'Sunglasses'], 'Wedge': ['Dress', 'Bag'], 'Heels': ['Dress', 'Bag', 'Earring'], 'Hat/brim': ['Sunglasses', 'Dress',
+    'Bag'], 'Cap/peaked': ['T-shirt', 'Sneakers', 'Sunglasses'], 'Sunglasses': ['Hat/brim', 'Swimsuit', 'Bag'],
+    'Gloves': ['Scarf', 'Hat/beanie', 'Coat'], 'Bracelet': ['Earring', 'Necklace', 'Ring'], 'Ring': ['Bracelet',
+    'Earring', 'Necklace'], 'Watch': ['Bracelet', 'Belt'], 'Robe': ['Slippers', 'Pyjama set'], 'Outdoor Waistcoat':
+    ['Sweater', 'Hat/beanie', 'Gloves'], 'Tailored Waistcoat': ['Shirt', 'Trousers', 'Tie'], 'Underwear Tights':
+    ['Dress', 'Skirt'], 'Swimwear set': ['Sarong', 'Sunglasses', 'Hat/brim'], 'Sarong': ['Bikini top', 'Sunglasses',
+    'Flip flop'], 'Jumpsuit/Playsuit': ['Bag', 'Sandals', 'Earring', 'Belt'], 'Hair/alice band': ['Earring', 'Hair clip'],
+    'Pyjama bottom': ['Pyjama set', 'Slippers'], 'Swimsuit': ['Sarong', 'Sunglasses', 'Hat/brim', 'Flip flop'],
 }
 ACCESSORIES_FOR = {'Blazer': ['Tie', 'Belt', 'Bag', 'Pumps', 'Other shoe'], 'Shirt': ['Tie', 'Belt', 'Watch'],
                    'Suit': ['Tie', 'Belt'], 'Dress': ['Bag', 'Earring', 'Necklace', 'Heeled sandals'],
@@ -369,6 +380,7 @@ class Catalog:
     # ------------------------------------------------------------------ intent + retrieval
 
     def parse(self, query):
+        query = ''.join(ch for ch in unicodedata.normalize('NFKD', query) if not unicodedata.combining(ch))
         corrected = self.correct(query)
         intent = None
         if self.use_llm:
@@ -734,7 +746,7 @@ class Catalog:
             if sort_by == 'relevance':
                 cand = ranked if reverse else ranked[::-1]
             else:
-                cand = self._field_sort(ranked[:100], sort_by, reverse)
+                cand = self._field_sort(ranked[:50], sort_by, reverse)
             ids = [self.ids[i] for i in cand[offset:offset + limit]]
         results = [{'id': i} for i in ids]
         recs = []

@@ -118,6 +118,17 @@ TYPE_WORDS = {
     'lipstick': ['Fine cosmetics'], 'nail polish': ['Fine cosmetics'], 'dog': ['Dog Wear', 'Dog wear'],
     'side table': ['Side table'], 'cushion': ['Cushion'], 'blanket': ['Blanket'], 'towel': ['Towel'],
     'gift box': ['Giftbox'], 'giftbox': ['Giftbox'], 'marker': ['Marker pen'], 'pen': ['Marker pen'],
+    'innerwear': ['Underwear bottom', 'Bra', 'Underwear set', 'Underwear body', 'Kids Underwear top'],
+    'inner wear': ['Underwear bottom', 'Bra', 'Underwear set', 'Underwear body', 'Kids Underwear top'],
+    'muffler': ['Scarf'], 'chappal': ['Sandals', 'Flip flop', 'Slippers'], 'nighty': ['Night gown'],
+    'night suit': ['Pyjama set'], 'nightsuit': ['Pyjama set'], 'jegging': ['Leggings/Tights', 'Trousers'],
+    'palazzo': ['Trousers'], 'culotte': ['Trousers', 'Shorts'],
+    'spec': ['Eyeglasses', 'Sunglasses'], 'spectacle': ['Eyeglasses'], 'sling bag': ['Cross-body bag', 'Bag', 'Shoulder bag'],
+    'satchel': ['Bag', 'Shoulder bag'], 'anorak': ['Jacket', 'Hoodie'], 'poncho': ['Other accessories', 'Top', 'Scarf'],
+    'banian': ['Vest top'], 'baniyan': ['Vest top'], 'sando': ['Vest top'], 'trackie': ['Trousers'],
+    'undie': ['Underwear bottom'], 'jammie': ['Pyjama set', 'Pyjama bottom'], 'swimmer': ['Swimsuit', 'Swimwear bottom'],
+    'brogue': ['Other shoe', 'Flat shoe'], 'derby': ['Other shoe', 'Flat shoe'], 'mule': ['Sandals', 'Heeled sandals', 'Wedge',
+    'Slippers', 'Heels', 'Other shoe'], 'oxford shoe': ['Other shoe', 'Flat shoe'],
     'underdress': ['Underdress'], 'slip': ['Underdress', 'Night gown'], 'corset': ['Underwear corset', 'Top'],
     'bumbag': ['Bumbag', 'Bag'], 'fanny pack': ['Bumbag', 'Bag'], 'waist bag': ['Bumbag', 'Bag'],
 }
@@ -735,7 +746,9 @@ def vibe_normalize(text):
 
 
 INJECTION_RE = re.compile(r'ignore (all |any )?(previous|prior|above)|system prompt|instructions|disregard|'
-                          r'return (all|every)|jailbreak|developer mode|print your|reveal')
+                          r'return (all|every)|jailbreak|developer mode|print your|reveal|<\s*/?\s*script|<\s*/?\s*[a-z]+[^>]*>|'
+                          r'\bselect\s+\*|\bselect\s+\w+\s+from\b|\bdrop\s+table\b|\binsert\s+into\b|\bunion\s+select\b|'
+                          r'\bdelete\s+from\b|javascript:|\{\{|\$\{|\bsudo\b|\brm\s+-rf\b|\beval\(|\bexec\(')
 
 
 def vibe_choices(query, base):
@@ -773,7 +786,45 @@ def rule_parse(query):  # noqa: F811 — wraps the core parser with vibe expansi
             r['choices'] = []
         elif v:
             r['choices'] = v
+    if r['relevant'] and r['choices']:
+        r['choices'] = [part for c in r['choices'] for part in split_multi(c)]
     return r
+
+
+SPLIT_BLOCK_RE = re.compile(r'\b(?:strip\w*|check\w*|plaid|print\w*|polka|dot\w*|colou?r[- ]?block\w*|two[- ]tone|tie[- ]dye|'
+                            r'ombre|pattern\w*|mix\w*|multi\w*|contrast\w*|panel\w*|block\w*)\b')
+
+
+def split_multi(choice):
+    """One requested item in several colours or for several audiences ('t-shirts in red, blue and green',
+    'sunglasses for men and women', 'dresses for mother and daughter') becomes one choice per colour / audience,
+    so the round-robin merge covers each of them. Patterns and two-tone 'black and white' stay one item."""
+    text = choice.get('text') or ''
+    low = ' ' + re.sub(r'[^a-z\- ]', ' ', text.casefold()) + ' '
+    keys, rest = [], low
+    for phrase in sorted(COLOR_WORDS, key=len, reverse=True):
+        if f' {phrase} ' in rest:
+            keys.append((low.find(f' {phrase} '), phrase))
+            rest = rest.replace(f' {phrase} ', ' ')
+    keys = [k for _, k in sorted(keys)]
+    out = [choice]
+    two_tone = set(keys) == {'black', 'white'} and not re.search(r'\bor\b', low)
+    if len(keys) >= 2 and not two_tone and not SPLIT_BLOCK_RE.search(low):
+        out = []
+        for k in keys:
+            c = dict(choice)
+            c['colors'] = COLOR_WORDS[k]
+            c['text'] = re.sub(r'\s+', ' ', ' '.join(w for w in text.split()
+                                                    if w.casefold().strip(',') not in COLOR_WORDS or w.casefold().strip(',') == k))
+            out.append(c)
+    groups = []
+    for w in words(text):
+        g = AUDIENCE_WORDS.get(w)
+        if g and g not in groups:
+            groups.append(g)
+    if len(groups) >= 2 and not ({'kids', 'boys'} == set(groups) or {'kids', 'girls'} == set(groups)):
+        out = [dict(c, audience=g) for c in out for g in groups]
+    return out
 
 
 def only_vibe_words(query):
