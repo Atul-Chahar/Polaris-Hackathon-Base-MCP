@@ -110,6 +110,7 @@ class Catalog:
         }
         self.type_arr = np.array([p['product_type'] for p in P], dtype=object)
         self.color_arr = np.array([p['color'] for p in P], dtype=object)
+        self.pattern_arr = np.array([p['pattern'] for p in P], dtype=object)
         self.type_list = sorted(set(self.type_arr))
         self.color_list = sorted(set(self.color_arr))
         self._build_audience()
@@ -148,8 +149,8 @@ class Catalog:
                                                                                                          'Womens')
         kids = has(aud, 'Children') | has(sec, 'Kids', 'Young', 'Girls', 'Boys')
         baby = has(aud, 'Baby')
-        self.aud_masks = {'men': men, 'women': women & ~men, 'kids': kids | baby, 'baby': baby,
-                          'boys': (kids | baby) & has(sec, 'Boy'), 'girls': (kids | baby) & has(sec, 'Girl'),
+        self.aud_masks = {'men': men, 'women': women & ~men, 'kids': kids & ~baby, 'baby': baby,
+                          'boys': kids & ~baby & ~has(sec, 'Girl'), 'girls': kids & ~baby & ~has(sec, 'Boy'),
                           'maternity': sec == 'Mama'}
         self.aud_masks['boys'] |= kids & ~has(sec, 'Girl') & ~has(sec, 'Boy') & False
 
@@ -354,12 +355,71 @@ class Catalog:
             score = 0.75 * s + 0.25 * lex_n
         else:
             score = lex_n
+        cov = self.attribute_coverage(text, idx)
+        if cov is not None:
+            score = score + 0.18 * cov
         if spec.get('audience') not in ('kids', 'boys', 'girls', 'baby'):
-            score = score - 0.06 * self.aud_masks['kids'][idx]
+            score = score - 0.2 * (self.aud_masks['kids'][idx] | self.aud_masks['baby'][idx])
+        if spec.get('audience') != 'maternity':
+            score = score - 0.1 * self.aud_masks['maternity'][idx]
+        if spec.get('colors'):
+            score = score + 0.03 * (self.pattern_arr[idx] == 'Solid')
         # Gentle quality prior so ties prefer well-reviewed items.
         score = score + 0.01 * np.where(self.rating_null[idx], 3.0, self.rating[idx]) / 5
         order = np.lexsort((idx, -score))
         return idx[order], score[order]
+
+    ATTR_SKIP = set(qp.AUDIENCE_WORDS) | {'wear', 'outfit', 'look', 'clothe', 'piece', 'item', 'thing', 'occasion',
+                                          'something', 'want', 'need', 'buy', 'show', 'find', 'shop', 'colour', 'color'}
+
+    ATTR_SYNONYMS = {'floral': ['floral', 'flower', 'flowery'], 'flower': ['floral', 'flower'],
+                     'flowery': ['floral', 'flower'], 'stripe': ['stripe', 'striped'], 'striped': ['stripe', 'striped'],
+                     'stripy': ['stripe', 'striped'], 'plaid': ['check', 'checked', 'plaid'], 'check': ['check', 'checked'],
+                     'checked': ['check', 'checked'], 'polka': ['dot', 'spot', 'polka'], 'dotted': ['dot', 'spot'],
+                     'leopard': ['leopard', 'animal'], 'printed': ['print', 'printed'], 'sparkly': ['sequin', 'glitter'],
+                     'glitter': ['sequin', 'glitter', 'glittery'], 'comfy': ['soft', 'comfortable', 'relaxed'],
+                     'cosy': ['soft', 'warm', 'knit'], 'cozy': ['soft', 'warm', 'knit'],
+                     'running': ['running', 'sport', 'sports', 'training', 'run'], 'gym': ['sport', 'sports', 'training'],
+                     'workout': ['sport', 'sports', 'training'], 'sporty': ['sport', 'sports'], 'yoga': ['yoga', 'sport'],
+                     'party': ['party', 'sequin', 'glitter', 'glittery', 'sheen', 'satin', 'velvet', 'festive'],
+                     'formal': ['tailored', 'formal', 'suit', 'smart', 'dressy'], 'smart': ['tailored', 'smart', 'suit'],
+                     'office': ['tailored', 'smart', 'suit', 'formal'], 'warm': ['padded', 'warm', 'lined', 'thermal',
+                     'down', 'wool', 'quilted', 'fleece'], 'winter': ['padded', 'warm', 'lined', 'wool', 'quilted',
+                     'winter', 'fleece'], 'wool': ['wool', 'merino', 'cashmere'], 'casual': ['casual', 'relaxed', 'jersey'],
+                     'elegant': ['elegant', 'satin', 'silk', 'chiffon', 'tailored'], 'beach': ['beach', 'swim', 'linen']}
+    ATTR_PATTERNS = {'floral': ['All over pattern'], 'flower': ['All over pattern'], 'printed': ['All over pattern',
+                     'Front print', 'Placement print'], 'stripe': ['Stripe'], 'striped': ['Stripe'], 'stripy': ['Stripe'],
+                     'check': ['Check'], 'checked': ['Check'], 'plaid': ['Check'], 'polka': ['Dot'], 'dotted': ['Dot'],
+                     'lace': ['Lace'], 'sequin': ['Sequin'], 'sparkly': ['Sequin', 'Glittering/Metallic'],
+                     'glitter': ['Sequin', 'Glittering/Metallic'], 'embroidered': ['Embroidery'], 'denim': ['Denim'],
+                     'solid': ['Solid'], 'plain': ['Solid'], 'metallic': ['Metallic', 'Glittering/Metallic']}
+
+    def attribute_coverage(self, text, idx):
+        """Fraction of descriptive query words (material, pattern, fit, style) present in each candidate's text."""
+        attrs = []
+        for w in set(stoks(text)):
+            if (len(w) < 3 or w in qp.STOP or w in self.ATTR_SKIP or w in qp.TYPE_WORDS or w in qp.COLOR_WORDS
+                    or (w not in self.postings and w not in self.ATTR_PATTERNS) or w.isdigit()):
+                continue
+            if w in self.postings and len(self.postings[w][0]) > 0.25 * len(self.products):
+                continue  # too common to discriminate
+            attrs.append(w)
+        if not attrs:
+            return None
+        cov = np.zeros(len(idx), dtype=np.float32)
+        total = 0.0
+        n = len(self.products)
+        for w in attrs:
+            hit = np.zeros(len(idx), dtype=bool)
+            for syn in self.ATTR_SYNONYMS.get(w, [w]):
+                if syn in self.postings:
+                    hit |= np.isin(idx, self.postings[syn][0])
+            for pat in self.ATTR_PATTERNS.get(w, []):
+                hit |= self.pattern_arr[idx] == pat
+            weight = math.log(n / (len(self.postings[w][0]) + 1 if w in self.postings else 2000))
+            cov += weight * hit
+            total += weight
+        return cov / total if total else None
 
     def relevant_set(self, ranked, scores, spec, has_hard):
         if not len(ranked):
@@ -421,8 +481,8 @@ class Catalog:
         anchor = self.products[self.index_of[results[0]['id']]]
         aud = next((c.get('audience') for c in intent.get('choices', []) if c.get('audience')), None)
         if aud is None:
-            aud = next((k for k in ('baby', 'men', 'kids', 'women') if self.aud_masks[k][self.index_of[anchor['id']]]),
-                       None)
+            a = self.index_of[anchor['id']]
+            aud = next((k for k in ('baby', 'kids', 'men', 'women') if self.aud_masks[k][a]), None)
         specs = [dict(c) for c in intent.get('complements', [])]
         if not specs:
             for t in COMPLEMENT_MAP.get(anchor['product_type'], []):
@@ -450,6 +510,8 @@ class Catalog:
         spec = dict(spec)
         spec['audience'] = spec.get('audience') or aud
         mask = self.spec_mask(spec, {}, mask)
+        if spec['audience'] in self.aud_masks:
+            mask &= self.aud_masks[spec['audience']]
         if spec.get('types'):
             mask &= self.type_arr != anchor['product_type'] if anchor['product_type'] not in spec['types'] else True
         idx = np.flatnonzero(mask)

@@ -141,13 +141,13 @@ IRRELEVANT_WORDS = {
     'laptop', 'charger', 'phone', 'iphone', 'smartphone', 'android', 'samsung', 'computer', 'tablet', 'ipad',
     'television', 'tv', 'fridge', 'refrigerator', 'microwave', 'oven', 'pizza', 'burger', 'food', 'restaurant',
     'recipe', 'grocery', 'groceries', 'vegetable', 'fruit', 'car', 'tyre', 'tire', 'engine', 'bike', 'bicycle',
-    'motorcycle', 'flight', 'hotel', 'ticket', 'movie', 'weather', 'stock', 'bitcoin', 'crypto', 'insurance',
+    'motorcycle', 'flight', 'hotel', 'ticket', 'weather', 'stock', 'bitcoin', 'crypto', 'insurance',
     'loan', 'medicine', 'tablet', 'doctor', 'battery', 'printer', 'keyboard', 'mouse', 'monitor', 'headphone',
     'earphone', 'speaker', 'camera', 'drill', 'hammer', 'cement', 'paint', 'sofa', 'mattress', 'bed', 'chair',
     'desk', 'spaceship', 'rocket', 'python', 'code', 'homework', 'essay', 'poem', 'joke', 'news', 'election',
     'cricket', 'football', 'ball', 'bat', 'racket', 'tent', 'fishing', 'guitar', 'piano', 'book', 'novel',
     'washing', 'machine', 'appliance', 'shampoo', 'toothpaste', 'soap', 'detergent', 'diaper', 'nappy', 'milk', 'coffee', 'tea', 'beer', 'wine bottle',
-    'whisky', 'cigarette', 'vape', 'gun', 'weapon', 'drug', 'pet food', 'cat food', 'fertilizer', 'seed', 'plant',
+    'whisky', 'rice', 'basmati', 'flour', 'sugar', 'oil', 'kg', 'cigarette', 'vape', 'gun', 'weapon', 'drug', 'pet food', 'cat food', 'fertilizer', 'seed', 'plant',
     'kurta', 'saree', 'sari', 'lehenga', 'sherwani', 'dhoti', 'salwar', 'dupatta',
 }
 
@@ -256,15 +256,41 @@ def find_types(text):
 
 
 def find_audience(text):
+    m = re.search(r'(\d{1,2})\s*(?:-|\s)?(?:year|yr|yo\b|y/o)', text.casefold())
+    if m:
+        age = int(m.group(1))
+        if age <= 2:
+            return 'baby'
+        if age <= 14:
+            ws = set(words(text))
+            return 'boys' if ws & {'son', 'boy', 'boys', 'nephew'} else 'girls' if ws & {
+                'daughter', 'girl', 'girls', 'niece'} else 'kids'
     for w in words(text):
         if w in AUDIENCE_WORDS:
             return AUDIENCE_WORDS[w]
     return None
 
 
+ACCESSORY_TYPES = {'Bag', 'Belt', 'Scarf', 'Gloves', 'Hat/beanie', 'Hat/brim', 'Cap/peaked', 'Socks', 'Tie', 'Sunglasses',
+                   'Earring', 'Necklace', 'Bracelet', 'Ring', 'Watch', 'Wallet', 'Sarong', 'Hair/alice band', 'Hair clip',
+                   'Umbrella', 'Straw hat', 'Bucket hat', 'Felt hat', 'Beanie', 'Underwear Tights'}
+TRAILING_COMP_RE = re.compile(r'\b(?:to match|to complement|that goes? with (?:it|them|this)|to go with (?:it|them)|'
+                              r'to pair with (?:it|them)|matching (?:it|them)|that match(?:es)?)\b|^\s*(?:matching|'
+                              r'coordinating|complementary)\b')
+
+
 def _segments(text):
     """Split a query into primary choice segments and complement segments."""
-    m = COMPLEMENT_RE.search(text.casefold())
+    low = text.casefold()
+    if True:
+        # "X with socks to match", "coat with a scarf and gloves", "jeans and a belt that goes with them"
+        for w in re.finditer(r'\b(?:with|and|plus)\s+(?:an?\s+|some\s+|the\s+)?', low):
+            before, after = low[:w.start()], low[w.end():]
+            bt, at = find_types(before)[0], find_types(after)[0]
+            if bt and at and (TRAILING_COMP_RE.search(after) or (w.group(0).startswith('with')
+                                                                  and set(at) <= ACCESSORY_TYPES)):
+                return [text[:w.start()]], [re.sub(TRAILING_COMP_RE, ' ', text[w.end():])]
+    m = COMPLEMENT_RE.search(low)
     primary, complement = (text[:m.start()], text[m.end():]) if m else (text, '')
     parts = [p for p in re.split(r'\s*(?:,|;|\band\b|\bor\b|&|\bplus\b|\balong with\b|/)\s*', primary) if p.strip()]
     # Merge parts without a product-type word into their neighbour ("black and white striped shirt").
@@ -390,12 +416,12 @@ def llm_parse(query, types_list, colors_list):
 # ---------------------------------------------------------------- vibe / occasion expansion (rule fallback)
 
 VIBES = [
-    (r'lazy|lounge|loungewear|comfy|comfortable|cosy|cozy|relax|chill|sunday|work from home|wfh|stay at home',
-     ['soft hoodie', 'jogger sweatpants', 'relaxed sweatshirt', 'pyjama set']),
+    (r'lazy|lounge|loungewear|comfy|comfortable|cosy|cozy|relax|chill|sunday|work from home|wfh|stay at home|movie',
+     ['relaxed hoodie', 'jogger sweatpants', 'soft sweatshirt', 'lounge pyjama set']),
     (r'beach|holiday|vacation|resort|seaside|pool|tropical|summer trip',
-     ['swimsuit', 'bikini', 'linen shorts', 'sarong', 'sandals', 'sun hat']),
+     ['swimsuit', 'bikini', 'beach sarong', 'linen shorts', 'sandals', 'straw sun hat']),
     (r'interview|office|formal|business|work|meeting|professional|corporate',
-     ['blazer', 'tailored trousers', 'shirt', 'blouse']),
+     ['tailored blazer', 'tailored suit trousers', 'formal shirt', 'smart blouse']),
     (r'party|night out|clubbing|cocktail|celebration|new year',
      ['party dress', 'sequin top', 'heeled sandals']),
     (r'wedding|reception|festive|gala|prom|ball\b|evening event',
@@ -403,7 +429,7 @@ VIBES = [
     (r'date night|dinner|romantic',
      ['dress', 'blouse', 'heeled sandals']),
     (r'gym|workout|running|jogging|yoga|fitness|training|sport',
-     ['sports bra', 'sports leggings', 'running sneakers', 'sports top']),
+     ['sports bra', 'sports leggings', 'sports top', 'sports shorts']),
     (r'winter|cold|snow|freezing|chilly|warm',
      ['padded jacket', 'wool coat', 'knit sweater', 'beanie', 'scarf']),
     (r'rain|monsoon|rainy',
@@ -434,7 +460,7 @@ def vibe_choices(query, base):
                 for k in ('audience', 'min_price', 'max_price'):
                     s[k] = base.get(k) if s.get(k) is None else s[k]
                 s['colors'] = s['colors'] or base.get('colors', [])
-                s['text'] = item + ' ' + query
+                s['text'] = item
                 out.append(s)
             return out
     return None

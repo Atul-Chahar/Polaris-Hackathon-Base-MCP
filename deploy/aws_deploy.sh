@@ -44,7 +44,7 @@ INSTANCE_ID=$(aws ec2 describe-instances \
 if [ "$INSTANCE_ID" = "None" ] || [ -z "$INSTANCE_ID" ]; then
   AMI=$(aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
     --query Parameter.Value --output text)
-  for TYPE in c7i.large t3.large; do
+  for TYPE in m7i-flex.large c7i-flex.large; do
     if INSTANCE_ID=$(aws ec2 run-instances --image-id "$AMI" --instance-type "$TYPE" \
         --key-name "$KEY_NAME" --security-group-ids "$SG_ID" \
         --block-device-mappings 'DeviceName=/dev/xvda,Ebs={VolumeSize=30,VolumeType=gp3,DeleteOnTermination=true}' \
