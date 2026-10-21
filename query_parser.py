@@ -440,6 +440,13 @@ def rule_parse(query):
         c['audience'] = c['audience'] or aud
         if c['min_price'] is None and c['max_price'] is None:
             c['min_price'], c['max_price'] = lo, hi
+    # Budgets are per item: a single budget written after the accompanying item ("a dress with matching sandals
+    # under 1500") also binds the primary item, unless the primary states its own budget.
+    if lo is None and hi is None:
+        priced = [c for c in complements if c['min_price'] is not None or c['max_price'] is not None]
+        if len(priced) == 1:
+            for c in choices:
+                c['min_price'], c['max_price'] = priced[0]['min_price'], priced[0]['max_price']
     # Drop choices that carry no product type when another choice has one (stray adjectives).
     if any(c['types'] for c in choices):
         typed = [c for c in choices if c['types']]

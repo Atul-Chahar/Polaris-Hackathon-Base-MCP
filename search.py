@@ -590,7 +590,8 @@ class Catalog:
             return []
         recs, used = [], set()
         anchor_colors = {anchor['color']} | NEUTRAL
-        per = [self._complement_candidates(s, aud, anchor, anchor_colors, exclude, formal) for s in specs]
+        ctx = self._soft_context(query)
+        per = [self._complement_candidates(s, aud, anchor, anchor_colors, exclude, formal, ctx) for s in specs]
         for i in range(5):
             for lst in per:
                 if i < len(lst) and len(recs) < 5:
@@ -603,7 +604,19 @@ class Catalog:
                                                 f"{anchor['color'].lower()} {anchor['product_type'].lower()}")[:300]})
         return recs
 
-    def _complement_candidates(self, spec, aud, anchor, anchor_colors, exclude, formal=False):
+    def _soft_context(self, query):
+        """Occasion / style words of the request ('dinner', 'office', 'beach', 'party'), without product, colour,
+        audience, price or complement-structure words. Used to make complements fit the occasion."""
+        out = []
+        for w in qp.words(qp.vibe_normalize(query)):
+            if (len(w) < 3 or w.isdigit() or w in qp.STOP or w in qp.COLOR_WORDS or w in qp.AUDIENCE_WORDS
+                    or w in qp.TYPE_WORDS or qp.stem(w) in qp.TYPE_WORDS or w in qp.GENERIC_COMPLEMENT
+                    or w in qp.PROTECTED_WORDS or w in ('inr', 'rupees', 'rupee', 'rs')):
+                continue
+            out.append(w)
+        return ' '.join(dict.fromkeys(out))
+
+    def _complement_candidates(self, spec, aud, anchor, anchor_colors, exclude, formal=False, ctx=''):
         mask = np.ones(len(self.products), dtype=bool)
         spec = dict(spec)
         spec['audience'] = spec.get('audience') or aud
@@ -625,9 +638,12 @@ class Catalog:
         idx = np.flatnonzero(mask)
         if not len(idx):
             return []
-        text = f"{spec.get('text') or ''} {anchor['color']} {anchor['product_type']}"
+        text = f"{spec.get('text') or ''} {ctx} {anchor['color']} {anchor['product_type']}"
         lex = self.bm25(text)[idx]
         score = 0.3 * lex / (lex.max() or 1.0)
+        cov = self.attribute_coverage(ctx, idx) if ctx else None
+        if cov is not None:
+            score = score + 0.15 * cov
         sem = self.semantic(text)
         if sem is not None:
             score = score + sem[idx]
