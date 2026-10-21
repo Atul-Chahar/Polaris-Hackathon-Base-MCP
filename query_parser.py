@@ -46,7 +46,7 @@ COLOR_WORDS = {
 
 # word (already stemmed/lowercase) -> catalog product types
 TYPE_WORDS = {
-    'jean': ['Trousers', 'Shorts'], 'denim': [], 'trouser': ['Trousers', 'Outdoor trousers'], 'pant': ['Trousers'],
+    'jean': ['Trousers'], 'denim': [], 'trouser': ['Trousers', 'Outdoor trousers'], 'pant': ['Trousers'],
     'chino': ['Trousers', 'Shorts'], 'jogger': ['Trousers'], 'sweatpant': ['Trousers'], 'track pant': ['Trousers'],
     'cargo': ['Trousers', 'Shorts'], 'legging': ['Leggings/Tights'], 'tight': ['Leggings/Tights', 'Underwear Tights'],
     'pantyhose': ['Underwear Tights'], 'stocking': ['Underwear Tights'],
@@ -249,10 +249,14 @@ def find_types(text):
     for phrase in sorted(TYPE_WORDS, key=len, reverse=True):
         p = ' ' + ' '.join(stem(w) for w in words(phrase)) + ' '
         if p.strip() and p in s:
-            found += TYPE_WORDS[phrase]
+            found.append(TYPE_WORDS[phrase])
             hit.append(phrase)
             s = s.replace(p, ' ')
-    return list(dict.fromkeys(found)), hit
+    groups = [g for g in found if g]
+    common = set(groups[0]).intersection(*groups[1:]) if len(groups) > 1 else set()
+    if common:  # "cargo pants", "jean shorts": several words describing one item
+        return [t for t in groups[0] if t in common], hit
+    return list(dict.fromkeys(t for g in groups for t in g)), hit
 
 
 def find_audience(text):
