@@ -412,12 +412,32 @@ def _segments(text):
     return merged or [primary], comps_merged
 
 
+# "to wear over my shirt", "under a blazer": the garment after over/under is what the shopper already has.
+CONTEXT_RE = re.compile(r'\b(?:(?:to|i can|you can)\s+(?:wear|go|layer|put on|throw on)\s+|worn\s+|for\s+)?'
+                        r'(over|on top of|under|underneath|beneath)\s+(?:my|a|an|the|your|his|her|their|our)\s+'
+                        r'([a-z][a-z\- ]*?)(?=\s*(?:$|[,.;!?]|\bfor\b|\bin\b|\bwith\b|\bto\b|\bwhen\b))')
+OUTER_LAYERS = ['Cardigan', 'Jacket', 'Blazer', 'Coat', 'Outdoor Waistcoat']
+
+
 def _spec(segment):
     lo, hi, rest = parse_prices(segment)
+    context = None
+    m = CONTEXT_RE.search(rest.casefold())
+    if m and find_types(m.group(2))[0]:
+        context = m.group(0).strip()
+        rest = rest[:m.start()] + ' ' + rest[m.end():]
     colors, _ = find_colors(rest)
     types, hits = find_types(rest)
-    return {'text': segment.strip(), 'types': types, 'colors': colors, 'audience': find_audience(segment),
+    text = segment.strip()
+    if context:
+        text = ' '.join(rest.split()) or text
+        if not types and m.group(1) in ('over', 'on top of'):
+            types = list(OUTER_LAYERS)  # "a layer / something to wear over my shirt"
+    spec = {'text': text, 'types': types, 'colors': colors, 'audience': find_audience(segment),
             'min_price': lo, 'max_price': hi, '_hits': hits}
+    if context:
+        spec['context'] = context
+    return spec
 
 
 RATING_RE = re.compile(r'(?:rated|rating(?: of)?|with)?\s*(?:at least|above|over|minimum|min|>=?)?\s*(\d(?:\.\d)?)\s*'
