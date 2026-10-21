@@ -405,10 +405,61 @@ def rule_parse(query):
         c['min_rating'], c['min_reviews'] = min_rating, min_reviews
     # An explicitly requested accompanying item that the catalog cannot supply ("matching earphones") means
     # no recommendation should be forced.
-    low = query.casefold()
-    requested = bool(COMPLEMENT_RE.search(low) or TRAILING_COMP_RE.search(low))
     return {'relevant': not irrelevant_hit, 'choices': choices, 'complements': complements, 'source': 'rules',
-            'complement_requested': requested}
+            'complement_requested': complement_unavailable(query)}
+
+
+GENERIC_COMPLEMENT = {'accessory', 'accessorie', 'accessories', 'something', 'anything', 'item', 'items', 'piece',
+                      'pieces', 'look', 'outfit', 'it', 'them', 'this', 'that', 'go', 'goes', 'match', 'wear',
+                      'complete', 'complementary', 'matching', 'coordinating', 'stuff', 'thing', 'things', 'extra'}
+
+
+def complement_unavailable(query):
+    """True only when the query names a specific accompanying item the catalog does not sell ("matching earphones").
+    Generic requests ("matching accessories", "something to go with it") still get recommendations."""
+    low = query.casefold()
+    m = COMPLEMENT_RE.search(low)
+    if not m:
+        return False
+    tail = low[m.end():]
+    if find_types(tail)[0]:
+        return False
+    content = [w for w in words(tail) if w not in STOP and w not in GENERIC_COMPLEMENT
+               and stem(w) not in GENERIC_COMPLEMENT and len(w) > 2 and not find_audience(w)]
+    return bool(content)
+
+
+# Requests that are not product searches at all (advice, writing, translation, trivia).
+NON_SHOPPING_RE = re.compile(r'^\s*(?:how\s+(?:do|to|can|should|does|did)|why\b|write\b|translate\b|explain\b|define\b|'
+                             r'calculate\b|tell me (?:a|about)|who\b|when\b)')
+SHOPPING_WORDS_RE = re.compile(r'\b(?:wear|wearing|buy|find|show|need|want|looking|recommend|suggest|get|gift|shop|'
+                               r'outfit|style|options|pair|match|should i)\b')
+# A catalog word used inside a phrase that names something the catalog does not sell.
+NON_CATALOG_RE = re.compile(r'\b(?:poem|essay|lyrics|joke|recipe)\b|\b(?:dog|cat|pet|bird|fish)\s+food\b|\bwine\s+glass(?:es)?\b|\b(?:yoga|bath|door|floor)\s+mat\b|'
+                            r'\bshoe\s+polish\b|\bface\s+(?:cream|wash|serum|mask)\b|\bmoisturi[sz]er\b|\bsunscreen\b|'
+                            r'\bstroller\b|\bpram\b|\bcrib\b|\bsaddle\b|\bcar\s+seat\b|\bremover\b|\bshampoo\b')
+IMPOSSIBLE_RE = re.compile(r'\bmade\s+(?:of|from|out of)\s+(?:steel|iron|metal|wood|wooden|glass|plastic|paper|stone|'
+                           r'concrete|solid gold|diamonds?|chocolate|ice)\b|\binvisible\b|\bfor\s+(?:my\s+|a\s+|the\s+)?'
+                           r'(?:cat|cats|kitten|horse|horses|bird|birds|fish|hamster|rabbit|cow|goat|parrot)\b')
+COLOR_CONFLICT_RE = re.compile(r'\b(?:that|which)\s+(?:is|are)\s+(?:completely\s+|totally\s+|fully\s+|actually\s+)?'
+                               r'([a-z]+)\b')
+
+
+def impossible(query):
+    t = query.casefold()
+    if NON_SHOPPING_RE.search(t) and not SHOPPING_WORDS_RE.search(t):
+        return True
+    if NON_CATALOG_RE.search(t) or IMPOSSIBLE_RE.search(t):
+        return True
+    m = COLOR_CONFLICT_RE.search(t)
+    if m and m.group(1) in COLOR_WORDS:
+        before = set(COLOR_WORDS) & set(words(t[:m.start()]))
+        if before and not any(set(COLOR_WORDS[b]) & set(COLOR_WORDS[m.group(1)]) for b in before):
+            return True  # "red jeans that are blue"
+    m = re.search(r'\b(?:a|an)\s+(?:₹\s*)?(\d[\d,]*)\s*(?:rs\.?|rupees?|inr|₹)?\s+(?!rupees?|rs|inr)[a-z]', t)
+    if m and float(m.group(1).replace(',', '')) > 8999:
+        return True  # "a 12000 rupee t-shirt": above every catalog price
+    return False
 
 
 # Facts the catalog does not record: other brands, sizes, stock, delivery, payment and discounts.
@@ -521,7 +572,7 @@ VIBES = [
 ]
 
 # Words the parser relies on for structure; never "correct" them into catalog words ("match" -> "watch").
-PROTECTED_WORDS = {'match', 'matches', 'matching', 'matched', 'pair', 'paired', 'pairs', 'complement', 'complementing',
+PROTECTED_WORDS = {'write', 'translate', 'poem', 'explain', 'match', 'matches', 'matching', 'matched', 'pair', 'paired', 'pairs', 'complement', 'complementing',
                    'complementary', 'coordinating', 'accompany', 'accompanying', 'goes', 'going', 'along', 'alongside',
                    'something', 'anything', 'cover', 'wear', 'worn', 'also', 'doubles', 'double', 'turns', 'into',
                    'each', 'both', 'either', 'neither', 'plus', 'with', 'without', 'under', 'over', 'between'}
@@ -600,7 +651,7 @@ _rule_parse_core = rule_parse
 
 def rule_parse(query):  # noqa: F811 — wraps the core parser with vibe expansion and injection checks
     r = _rule_parse_core(query)
-    if INJECTION_RE.search(query.casefold()) or contradictory(query):
+    if INJECTION_RE.search(query.casefold()) or contradictory(query) or impossible(query):
         r['relevant'] = False
         return r
     if r['relevant'] and not any(c['types'] for c in r['choices']):
