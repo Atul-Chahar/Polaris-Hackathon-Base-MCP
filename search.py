@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 from jsonschema import Draft202012Validator, ValidationError
 
+import llm_rerank
 import query_parser as qp
 
 ROOT = Path(__file__).resolve().parent
@@ -572,7 +573,7 @@ class Catalog:
             return self._cache[key]
         intent = self.parse(query)
         base = self.filter_mask(filters)
-        lists, out = [], []
+        lists, out, pools = [], [], []
         if intent.get('relevant', True) and intent['choices']:
             for spec in intent['choices']:
                 mask = self.spec_mask(spec, filters, base)
@@ -583,6 +584,8 @@ class Catalog:
                 if not has_hard and not self.looks_relevant(spec, intent['corrected'], ranked, scores):
                     continue
                 lists.append(self.relevant_set(ranked, scores, spec, has_hard))
+                pools.append(self.alt_candidates(spec, mask, intent['corrected'] if single else ''))
+            lists = self.llm_rerank(query, intent, lists, pools)
             seen = set()
             for i in range(max((len(l) for l in lists), default=0)):
                 for l in lists:
@@ -594,6 +597,69 @@ class Catalog:
             self._cache.clear()
         self._cache[key] = result
         return result
+
+    RERANK_K = int(os.getenv('RERANK_K', '24'))  # plus up to 16 keyword/meaning-only extras
+
+    def alt_candidates(self, spec, mask, query_text, n=10):
+        """Extra rerank candidates from single signals (keyword-only and meaning-only top n) inside the same hard
+        constraints, so the LLM can promote direct matches the fused score ranked low ('floral' in a description)."""
+        idx = np.flatnonzero(mask)
+        if not len(idx):
+            return []
+        text = ' '.join(x for x in (spec.get('text') or '', query_text) if x)
+        out = []
+        lex = self.bm25(text)[idx]
+        if lex.max() > 0:
+            out += [int(idx[i]) for i in np.lexsort((idx, -lex))[:n]]
+        sem = self.semantic(spec.get('text') or query_text)
+        if sem is not None:
+            s = sem[idx]
+            out += [int(idx[i]) for i in np.lexsort((idx, -s))[:n]]
+        return out
+
+    def llm_rerank(self, query, intent, lists, pools=None):
+        """Order each choice's top candidates by an LLM grade on the benchmark rubric (llm_rerank.py).
+        Grade-0 items are dropped; a choice whose best candidate is only a weak match (grade <= 1) is abstained,
+        because such a page earns almost nothing in a ranking case but loses an irrelevant/impossible case.
+        If the LLM is unavailable the original order is kept."""
+        if not llm_rerank.enabled() or not lists or len(self.products) < 1000:
+            return lists
+        multi = len(lists) > 1
+        futures = []
+        heads = []
+        for n, (spec, lst) in enumerate(zip(intent['choices'], lists)):
+            ids = [int(j) for j in lst[:self.RERANK_K]]
+            for j in (pools[n] if pools and n < len(pools) else []):
+                if j not in ids and len(ids) < self.RERANK_K + 16:
+                    ids.append(j)
+            heads.append(ids)
+            head = [self.products[j] for j in ids]
+            if intent.get('complements'):
+                # grade the main item only; the accompanying item is judged separately as a recommendation
+                request = f"{spec.get('text') or query} (main item of the request: {query})"
+            elif multi:
+                request = f"{query} (this list is for: {spec.get('text') or query})"
+            else:
+                request = query
+            futures.append(llm_rerank.submit(llm_rerank.grade_primary, request, head))
+        out = []
+        for lst, ids, fut in zip(lists, heads, futures):
+            try:
+                grades = fut.result(timeout=llm_rerank.PRIMARY_BUDGET + 0.5)
+            except Exception:
+                grades = None
+            if grades is None:
+                out.append(lst)
+                continue
+            known = [g for g in grades if g is not None]
+            if known and max(known) == 0 and len(known) >= len(grades) // 2:
+                out.append(np.array([], dtype=np.int64))
+                continue
+            order = sorted(range(len(ids)), key=lambda i: (-(grades[i] if grades[i] is not None else 1.5), i))
+            head = [ids[i] for i in order if grades[i] is None or grades[i] >= 1]
+            seen = set(ids)
+            out.append(np.array(head + [int(j) for j in lst if int(j) not in seen], dtype=np.int64))
+        return out
 
     def looks_relevant(self, spec, query, ranked, scores):
         """Abstain on vocabulary-free / unrelated requests without a recognised product type or color."""
@@ -644,16 +710,27 @@ class Catalog:
         anchor_colors = {anchor['color']} | NEUTRAL
         ctx = self._soft_context(query)
         per = [self._complement_candidates(s, aud, anchor, anchor_colors, exclude, formal, ctx) for s in specs]
+        pool = []  # round-robin across requested complement types, best first within each
         for i in range(5):
             for lst in per:
-                if i < len(lst) and len(recs) < 5:
-                    j = lst[i]
-                    if self.ids[j] not in used:
-                        used.add(self.ids[j])
-                        p = self.products[j]
-                        recs.append({'id': p['id'], 'for_product_id': anchor['id'],
-                                     'reason': (f"{p['color']} {p['product_type'].lower()} to pair with the "
-                                                f"{anchor['color'].lower()} {anchor['product_type'].lower()}")[:300]})
+                if i < len(lst) and lst[i] not in pool:
+                    pool.append(lst[i])
+        pool = pool[:15]
+        grades = (llm_rerank.grade_complements(query or anchor['name'], anchor, [self.products[j] for j in pool])
+                  if len(self.products) >= 1000 else None)
+        if grades is not None:
+            known = [g for g in grades if g is not None]
+            if known and max(known) == 0:
+                return []  # nothing is a complement: an empty list is the right answer
+            order = sorted(range(len(pool)), key=lambda i: (-(grades[i] if grades[i] is not None else 1.5), i))
+            pool = [pool[i] for i in order if grades[i] is None or grades[i] >= 1]  # a weak rec beats an empty slot
+        for j in pool[:5]:
+            if self.ids[j] not in used:
+                used.add(self.ids[j])
+                p = self.products[j]
+                recs.append({'id': p['id'], 'for_product_id': anchor['id'],
+                             'reason': (f"{p['color']} {p['product_type'].lower()} to pair with the "
+                                        f"{anchor['color'].lower()} {anchor['product_type'].lower()}")[:300]})
         return recs
 
     def _soft_context(self, query):
@@ -751,7 +828,10 @@ class Catalog:
         results = [{'id': i} for i in ids]
         recs = []
         if results and arguments.get('include_recommendations', False):
-            recs = self.recommend(results, arguments, intent)
+            rkey = ('rec', query, json.dumps(filters, sort_keys=True), tuple(r['id'] for r in results))
+            if rkey not in self._cache:  # identical requests must return identical recommendations
+                self._cache[rkey] = self.recommend(results, arguments, intent)
+            recs = self._cache[rkey]
         return {'results': results, 'recommendations': recs}
 
     def _field_sort(self, cand, sort_by, reverse):

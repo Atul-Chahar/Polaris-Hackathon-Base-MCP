@@ -49,3 +49,9 @@ requests==2.34.2
 tokenizers==0.23.3
 tqdm==4.70.1
 urllib3==2.8.0
+boto3==1.43.116
+botocore==1.43.116
+jmespath==1.1.0
+python-dateutil==2.9.0.post0
+s3transfer==0.19.3
+six==1.17.0
