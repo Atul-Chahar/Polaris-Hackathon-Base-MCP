@@ -287,7 +287,7 @@ TRAILING_COMP_RE = re.compile(r'\b(?:to match|to complement|that goes? with (?:i
 
 CLAUSE_BOUNDARY_RE = re.compile(r'[;.?!]+\s*|,\s*(?:and\s+)?|\s+and\s+(?=(?:also\s+|then\s+|please\s+)?(?:recommend|'
                                 r'suggest|show|find|add|include|pick|what|which)\b)')
-REC_CLAUSE_RE = re.compile(r'\b(?:recommend\w*|suggest\w*|propose|what|which|any|also|add|include|pick)\b|'
+REC_CLAUSE_RE = re.compile(r'\b(?:recommend\w*|suggest\w*|propose)\b|'
                            r'\b(?:match(?:es|ing)?|go(?:es)?(?: well)? with|wear with|pair(?:ed|s)?(?: well)? with|'
                            r'complement\w*|coordinat\w*|complete (?:the|my) look|accessori[sz]e)\b')
 COMP_WITH_RE = re.compile(r'\b(?:paired with|pair it with|along with|alongside|together with|teamed with|with)\s+'
@@ -355,7 +355,8 @@ def _segments(text):
                 return [text[:w.start()]], ([p for p in parts if find_types(p)[0]] or [comp])
     m = COMPLEMENT_RE.search(low)
     primary, complement = (text[:m.start()], text[m.end():]) if m else (text, '')
-    parts = [p for p in re.split(r'\s*(?:,|;|\band\b|\bor\b|&|\bplus\b|\balong with\b|/)\s*', primary) if p.strip()]
+    parts = [p for p in re.split(r'\s*(?:,|;|[.?!]\s|\band\b|\bor\b|&|\bplus\b|\balong with\b|\bas well as\b|'
+                                 r'\balso\b|/)\s*', primary) if p.strip()]
     # Merge parts without a product-type word into their neighbour ("black and white striped shirt").
     merged = []
     for part in parts:
@@ -494,8 +495,32 @@ COLOR_CONFLICT_RE = re.compile(r'\b(?:that|which)\s+(?:is|are)\s+(?:completely\s
                                r'([a-z]+)\b')
 
 
+MEN_ONLY_IMPOSSIBLE_RE = re.compile(r'\b(?:bikinis?|lingerie|bras?|bralettes?|maternity|mama|nursing|pregnan\w*)\b')
+# Phrases naming a non-catalog thing even though they contain a catalog word: always empty.
+NON_CATALOG2_RE = re.compile(r'\bpower ?banks?\b|\bgift ?cards?\b|\b(?:dining|coffee|study|office|dressing) tables?\b|'
+                             r'\bfootball boots\b|\bcleats\b|\bski boots\b|\b(?:ice |roller )skates\b|\bshin guards?\b|'
+                             r'\bboxing gloves\b|\bsupplements?\b|\bvitamins?\b')
+# Non-catalog nouns that are also used as colours or prints ("chocolate brown", "cake print"): empty only when the
+# query names no catalog product.
+NON_CATALOG_WEAK_RE = re.compile(r'\bdrones?\b|\bcakes?\b|\bchocolates?\b|\bprotein\b|\bvouchers?\b|\bsubscriptions?\b|'
+                                 r'\bdesks?\b|\bgoggles\b|\bhelmets?\b|\bearbuds\b|\bair ?pods\b|\bconsoles?\b|'
+                                 r'\bplaystation\b|\bxbox\b|\bnintendo\b|\bpower\b')
+PRICE_IS_RE = re.compile(r'\b(?:costs?|costing|priced at|at a price of|worth|for)\s*(?:rs\.?|inr|₹)\s*(\d[\d,]*)|'
+                         r'\b(?:costs?|costing|priced at|at a price of|worth)\s*(?:rs\.?|inr|₹)?\s*(\d[\d,]*)')
+
+
 def impossible(query):
     t = query.casefold()
+    if find_audience(t) == 'men' or re.search(r"\bmen'?s\b|\bfor (?:men|him|my (?:husband|boyfriend|dad|brother))\b", t):
+        if MEN_ONLY_IMPOSSIBLE_RE.search(t):
+            return True  # the catalog has no menswear bikinis, lingerie or maternity wear
+    if NON_CATALOG2_RE.search(t) or (NON_CATALOG_WEAK_RE.search(t) and not find_types(t)[0]):
+        return True
+    m = PRICE_IS_RE.search(t)
+    if m:
+        price = float((m.group(1) or m.group(2)).replace(',', ''))
+        if price > 8999 * 1.25 or 0 < price < 199 * 0.75:
+            return True  # stated price outside every catalog price
     if NON_SHOPPING_RE.search(t) and not SHOPPING_WORDS_RE.search(t):
         return True
     if NON_CATALOG_RE.search(t) or IMPOSSIBLE_RE.search(t):

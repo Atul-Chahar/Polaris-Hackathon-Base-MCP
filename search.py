@@ -133,6 +133,7 @@ class Catalog:
         self._build_audience()
         self._build_bm25()
         self.emb = embeddings
+        self.emb_desc = None
         self._embedder = None
         self._emb_lock = threading.Lock()
         self.use_llm = use_llm if use_llm is not None else os.getenv('LLM_PROVIDER', '') != 'none'
@@ -151,6 +152,10 @@ class Catalog:
                 print('embedding row mismatch; semantic search disabled', file=sys.stderr)
                 emb = None
         cat = cls(products, emb)
+        desc_path = Path(path).parent / 'emb_desc.npy'
+        if emb is not None and desc_path.exists() and os.getenv('DESC_W', '0') != '0':
+            desc = np.load(desc_path).astype(np.float32)
+            cat.emb_desc = desc if desc.shape == emb.shape else None
         if emb is not None:
             cat._embed_query('warm up')
         return cat
@@ -245,10 +250,29 @@ class Catalog:
                 cands.update(self._deletes.get(d, []))
         return {c for c in cands if c != w and (_edit1(w, c) or _edit1(qp.stem(w), c) or _edit1(w, qp.stem(c)))}
 
+    TYPE_TOKENS = sorted({t for phrase in qp.TYPE_WORDS for t in re.findall(r'[a-z]+', phrase) if len(t) >= 4}
+                         | {'sneakers', 'trousers', 'leggings', 'pyjamas', 'pajamas', 'earrings', 'sunglasses', 'jeans',
+                            'shorts', 'sandals', 'boots', 'socks', 'sweatshirt', 'tshirt'})
+
     def _best_candidate(self, w):
         cands = self._typo_candidates(w)
         if not cands:
+            return self._type_word_within2(w)
+        return max(cands, key=lambda c: (c in qp.TYPE_WORDS or qp.stem(c) in qp.TYPE_WORDS or c in qp.COLOR_WORDS,
+                                         self.vocab.get(c, 0) + self.vocab.get(qp.stem(c), 0), c))
+
+    def _type_word_within2(self, w):
+        """Second pass for unknown words of 5+ letters: a product noun within two edits ('swaer', 'cadign', 'pjams')."""
+        if len(w) < 5:
             return w
+        best, best_d = w, 3
+        for t in self.TYPE_TOKENS:
+            if abs(len(t) - len(w)) > 2 or t[0] != w[0] and t[-1] != w[-1]:
+                continue
+            d = _osa(w, t)
+            if d < best_d or (d == best_d and best != w and len(t) < len(best)):
+                best, best_d = t, d
+        return best if best_d <= 2 else w
         return max(cands, key=lambda c: (c in qp.TYPE_WORDS or qp.stem(c) in qp.TYPE_WORDS or c in qp.COLOR_WORDS,
                                          self.vocab.get(c, 0) + self.vocab.get(qp.stem(c), 0), c))
 
@@ -282,7 +306,11 @@ class Catalog:
         v = self._embed_query(text)
         if v is None:
             return None
-        return self.emb @ v
+        if self.emb_desc is None:
+            return self.emb @ v
+        # Blend name/attribute similarity with description similarity (queries are often written from descriptions).
+        w = float(os.getenv('DESC_W', '0'))
+        return (1 - w) * (self.emb @ v) + w * (self.emb_desc @ v)
 
     # ------------------------------------------------------------------ filtering
 
@@ -355,7 +383,8 @@ class Catalog:
                     c['min_price'], c['max_price'] = rules['choices'][0]['min_price'], rules['choices'][0]['max_price']
             if not intent['complements'] and rules['complements']:
                 intent['complements'] = rules['complements']
-        if qp.INJECTION_RE.search(corrected.casefold()) or qp.contradictory(query) or (not rules['relevant'] and not any(
+        if qp.INJECTION_RE.search(corrected.casefold()) or qp.contradictory(query) or qp.impossible(query) or (
+                not rules['relevant'] and not any(
                 c.get('types') for c in rules['choices'])):
             intent['relevant'] = False
         intent['corrected'] = corrected
@@ -376,7 +405,8 @@ class Catalog:
         sem = self.semantic(sem_text)
         if sem is not None:
             s = sem[idx]
-            score = 0.75 * s + 0.25 * lex_n
+            wl = float(os.getenv('LEX_W', '0.25'))
+            score = (1 - wl) * s + wl * lex_n
         else:
             score = lex_n
         cov = self.attribute_coverage(f"{text} {spec.get('context') or ''}", idx)
@@ -685,3 +715,17 @@ def _edit1(a, b):
         if a == b[:i] + b[i + 1:]:
             return True
     return False
+
+
+def _osa(a, b):
+    """Optimal string alignment distance (Levenshtein plus adjacent transpositions)."""
+    prev2, prev = None, list(range(len(b) + 1))
+    for i in range(1, len(a) + 1):
+        cur = [i] + [0] * len(b)
+        for j in range(1, len(b) + 1):
+            cost = a[i - 1] != b[j - 1]
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
+                cur[j] = min(cur[j], prev2[j - 2] + 1)
+        prev2, prev = prev, cur
+    return prev[-1]
