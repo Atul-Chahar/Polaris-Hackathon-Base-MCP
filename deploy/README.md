@@ -10,3 +10,11 @@
 8. Don't redeploy while a benchmark run is in flight. Submit `http://IP:8000/mcp`, never localhost or a private IP.
 9. Security group is 0.0.0.0/0 on 22 and 8000. You can narrow 8000 to the organizer runner IP and 22 to your own IP.
 10. No-AWS fallback: on any VM with a public IP + Docker, run `git clone`/`rsync` of the repo (with data/emb.npy), then `docker build -t polaris-search:latest . && docker run -d --name polaris-search --restart unless-stopped -p 8000:8000 --env-file app.env -e MCP_ALLOWED_HOSTS="localhost:*,127.0.0.1:*,PUBLIC_IP:*,PUBLIC_IP" polaris-search:latest`, and open port 8000 in that provider's firewall.
+
+## Live deployment (hackathon)
+
+- EC2 `m7i-flex.large` (free-tier eligible), ap-south-1, Elastic IP `15.206.29.88`.
+- Benchmark URL: `http://15.206.29.88:8000/mcp`. HTTPS for Claude Desktop: `https://15-206-29-88.sslip.io/mcp`.
+- Security group opens 22, 80, 443 and 8000. Extra allowed hosts: `EXTRA_HOSTS=a,b ~/run.sh <image>`.
+- LLM keys are optional and off: Gemini and NIM free tiers took over 4 s per call. The rule parser plus embeddings is faster and scored better locally.
+- SpringWinter could not build: new AWS accounts have a CodeBuild queue quota of 0.

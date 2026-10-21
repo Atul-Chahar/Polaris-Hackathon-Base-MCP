@@ -29,9 +29,12 @@ PUBLIC_IP=$(curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.25
 docker rm -f polaris-search >/dev/null 2>&1 || true
 docker run -d --name polaris-search --restart unless-stopped -p 8000:8000 \
   --env-file /home/ec2-user/app.env \
-  -e MCP_ALLOWED_HOSTS="localhost:*,127.0.0.1:*,[::1]:*,${PUBLIC_IP}:*,${PUBLIC_IP}" \
+  -e MCP_ALLOWED_HOSTS="localhost:*,127.0.0.1:*,[::1]:*,${PUBLIC_IP}:*,${PUBLIC_IP},${PUBLIC_IP//./-}.sslip.io,${PUBLIC_IP//./-}.sslip.io:*${EXTRA_HOSTS:+,$EXTRA_HOSTS}" \
   "$IMAGE"
-echo "started $IMAGE -> http://${PUBLIC_IP}:8000/mcp"
+# HTTPS for MCP clients such as Claude Desktop: Caddy + Let's Encrypt on an sslip.io name for this IP.
+docker start caddy >/dev/null 2>&1 || docker run -d --name caddy --restart unless-stopped --network host \
+  -v caddy_data:/data caddy:2 caddy reverse-proxy --from "${PUBLIC_IP//./-}.sslip.io" --to 127.0.0.1:8000 >/dev/null
+echo "started $IMAGE -> http://${PUBLIC_IP}:8000/mcp  https://${PUBLIC_IP//./-}.sslip.io/mcp"
 RUN
 chmod +x /home/ec2-user/run.sh
 chown ec2-user:ec2-user /home/ec2-user/run.sh
