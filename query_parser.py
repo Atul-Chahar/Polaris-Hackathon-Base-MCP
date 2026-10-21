@@ -264,13 +264,23 @@ def find_colors(text):
     return list(dict.fromkeys(found)), t
 
 
+_TYPE_PHRASES = []
+
+
+def _type_phrases():
+    """TYPE_WORDS keys longest first with their stemmed, space-padded form (computed once)."""
+    if len(_TYPE_PHRASES) != len(TYPE_WORDS):
+        _TYPE_PHRASES[:] = [(ph, ' ' + ' '.join(stem(w) for w in words(ph)) + ' ')
+                            for ph in sorted(TYPE_WORDS, key=len, reverse=True)]
+    return _TYPE_PHRASES
+
+
 def find_types(text):
     """Longest-phrase-first matching of product-type words on stemmed tokens."""
     toks = [stem(w) for w in words(text)]
     s = ' ' + ' '.join(toks) + ' '
     found, hit = [], []
-    for phrase in sorted(TYPE_WORDS, key=len, reverse=True):
-        p = ' ' + ' '.join(stem(w) for w in words(phrase)) + ' '
+    for phrase, p in _type_phrases():
         if p.strip() and p in s:
             found.append(TYPE_WORDS[phrase])
             hit.append(phrase)
