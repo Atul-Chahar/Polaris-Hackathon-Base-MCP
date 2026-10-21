@@ -129,6 +129,15 @@ TYPE_WORDS = {
     'undie': ['Underwear bottom'], 'jammie': ['Pyjama set', 'Pyjama bottom'], 'swimmer': ['Swimsuit', 'Swimwear bottom'],
     'brogue': ['Other shoe', 'Flat shoe'], 'derby': ['Other shoe', 'Flat shoe'], 'mule': ['Sandals', 'Heeled sandals', 'Wedge',
     'Slippers', 'Heels', 'Other shoe'], 'oxford shoe': ['Other shoe', 'Flat shoe'],
+    # body parts ("something to keep my head warm", "something for my feet at the beach")
+    'my head': ['Hat/beanie', 'Beanie', 'Cap/peaked', 'Hat/brim', 'Bucket hat', 'Straw hat', 'Felt hat'],
+    'the head': ['Hat/beanie', 'Beanie', 'Cap/peaked', 'Hat/brim', 'Bucket hat', 'Straw hat', 'Felt hat'],
+    'my feet': ['Sneakers', 'Sandals', 'Boots', 'Flip flop', 'Slippers', 'Ballerinas', 'Flat shoe', 'Other shoe', 'Socks'],
+    'the feet': ['Sneakers', 'Sandals', 'Boots', 'Flip flop', 'Slippers', 'Ballerinas', 'Flat shoe', 'Other shoe', 'Socks'],
+    'my neck': ['Scarf', 'Necklace'], 'my hand': ['Gloves'], 'my eye': ['Sunglasses', 'Eyeglasses'],
+    'my ear': ['Earring', 'Earrings'], 'my waist': ['Belt'], 'my wrist': ['Bracelet', 'Watch'],
+    'my hair': ['Hair/alice band', 'Hair clip', 'Hair string', 'Hair ties', 'Hairband'], 'my finger': ['Ring'],
+    'bootie': ['Bootie', 'Boots'], 'booty': ['Bootie', 'Boots'],
     'underdress': ['Underdress'], 'slip': ['Underdress', 'Night gown'], 'corset': ['Underwear corset', 'Top'],
     'bumbag': ['Bumbag', 'Bag'], 'fanny pack': ['Bumbag', 'Bag'], 'waist bag': ['Bumbag', 'Bag'],
 }
@@ -146,6 +155,8 @@ AUDIENCE_WORDS = {
     'girl': 'girls', 'girls': 'girls', 'daughter': 'girls', 'niece': 'girls',
     'baby': 'baby', 'babies': 'baby', 'infant': 'baby', 'newborn': 'baby', 'toddlers': 'kids',
     'maternity': 'maternity', 'pregnant': 'maternity', 'pregnancy': 'maternity',
+    'teen': 'kids', 'teens': 'kids', 'teenage': 'kids', 'teenager': 'kids', 'teenagers': 'kids', 'tween': 'kids',
+    'tweens': 'kids', 'preschooler': 'kids', 'schoolboy': 'boys', 'schoolgirl': 'girls',
 }
 
 IRRELEVANT_WORDS = {
@@ -281,10 +292,14 @@ def find_audience(text):
             ws = set(words(text))
             return 'boys' if ws & {'son', 'boy', 'boys', 'nephew'} else 'girls' if ws & {
                 'daughter', 'girl', 'girls', 'niece'} else 'kids'
-    for w in words(text):
-        if w in AUDIENCE_WORDS:
-            return AUDIENCE_WORDS[w]
-    return None
+    found = [AUDIENCE_WORDS[w] for w in words(text) if w in AUDIENCE_WORDS]
+    if not found:
+        return None
+    # "a teenage boy", "my toddler daughter": the more specific group wins over plain 'kids'
+    for specific in ('baby', 'boys', 'girls'):
+        if specific in found and 'kids' in found:
+            return specific
+    return found[0]
 
 
 MENS_COMPLEMENTS = {'Tie'}
@@ -779,13 +794,19 @@ def rule_parse(query):  # noqa: F811 — wraps the core parser with vibe expansi
     if r['relevant'] and not any(c['types'] for c in r['choices']):
         base = r['choices'][0] if r['choices'] else {}
         v = vibe_choices(query, base)
-        if v and not APPAREL_CUE_RE.search(query.casefold()) and not only_vibe_words(query):
+        low = query.casefold()
+        if v and not APPAREL_CUE_RE.search(low) and not only_vibe_words(query):
             # An occasion with no clothing cue ("gym membership", "wedding venue", "party balloons") is not a
             # request for this catalog.
             r['relevant'] = False
             r['choices'] = []
         elif v:
             r['choices'] = v
+        elif APPAREL_CUE_RE.search(low) or GIFT_RE.search(low) or KID_CUE_RE.search(low):
+            # "something cute for a toddler", "a present for a teenage boy", "gift for my wife"
+            d = audience_defaults(query, base)
+            if d:
+                r['choices'] = d
     if r['relevant'] and r['choices']:
         r['choices'] = [part for c in r['choices'] for part in split_multi(c)]
     return r
@@ -825,6 +846,39 @@ def split_multi(choice):
     if len(groups) >= 2 and not ({'kids', 'boys'} == set(groups) or {'kids', 'girls'} == set(groups)):
         out = [dict(c, audience=g) for c in out for g in groups]
     return out
+
+
+AUDIENCE_DEFAULTS = {
+    'baby': ['baby bodysuit', 'baby romper', 'baby hat', 'baby set'],
+    'girls': ['girls dress', 'girls t-shirt', 'girls leggings', 'girls hoodie'],
+    'boys': ['boys t-shirt', 'boys shorts', 'boys hoodie', 'boys trousers'],
+    'kids': ['kids t-shirt', 'kids hoodie', 'kids dress', 'kids trousers'],
+    'women': ['dress', 'blouse', 'cardigan', 'trousers'], 'men': ['shirt', 't-shirt', 'sweater', 'trousers'],
+}
+GIFT_DEFAULTS = {'women': ['necklace', 'earrings', 'scarf', 'bag', 'pyjama set'],
+                 'men': ['wallet', 'belt', 'scarf', 'beanie', 'tie']}
+GIFT_RE = re.compile(r'\b(?:gift|gifts|present|presents|surprise)\b')
+KID_CUE_RE = re.compile(r'\b(?:something|anything|stuff|things?|clothes|clothing|outfits?)\b.*\b(?:toddlers?|teen\w*|tweens?|kids?|'
+                        r'child|children|boys?|girls?|babies|baby|newborns?|son|daughter)\b')
+
+
+def audience_defaults(query, base):
+    """'something cute for a toddler', 'a present for a teenage boy', 'gift for my wife': an audience with no product
+    named. Gifts for adults lean to accessories; otherwise everyday clothing for that audience."""
+    aud = find_audience(query)
+    if not aud or aud == 'maternity':
+        return None
+    items = GIFT_DEFAULTS.get(aud) if GIFT_RE.search(query.casefold()) else None
+    items = items or AUDIENCE_DEFAULTS.get(aud)
+    out = []
+    for item in items or []:
+        s = _spec(item)
+        s['audience'] = aud
+        for k in ('min_price', 'max_price', 'min_rating', 'min_reviews'):
+            s[k] = base.get(k) if s.get(k) is None else s[k]
+        s['colors'] = s['colors'] or base.get('colors', [])
+        out.append(s)
+    return out or None
 
 
 def only_vibe_words(query):

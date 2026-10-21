@@ -41,7 +41,11 @@ show us 10 shirts|overnight bag|weekend bag|socks pack of 30 a month|t-shirts 40
 black cotton t-shirt for men under 1000|floral summer dress|jeans with a belt|a dress with a matching bag under 1000|
 lace bra|padded bra in black|a bra for teen girls|running shoes for men|40s style dress|
 a dress made in organic cotton|drèss|DRESS|t shirt|t-shirts in red, blue and green|sunglasses for men and women|
-pyjamas for dad, mom and kids|innerwear for men|muffler|chappals|nighty|palazzo pants|sling bag"""
+pyjamas for dad, mom and kids|innerwear for men|muffler|chappals|nighty|palazzo pants|sling bag|
+something to keep my head warm|something for my feet at the beach|something for my neck in winter|
+something to protect my eyes from the sun|a hoodie and something warm for my head|gift for my wife|
+gift for my husband|something for my 3 year old daughter|clothes for my dad|something cute for a toddler|
+a present for a teenage boy|stuff for a newborn baby boy|pink bootie for children|bootie for kids"""
 
 
 def main():
